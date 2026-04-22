@@ -9,13 +9,13 @@ import { useLang } from '@/context/LangContext'
 import {
   LayoutDashboard, FolderOpen, Users, UserSquare2, Heart,
   CalendarCheck, Package, TrendingUp, CreditCard,
-  CalendarDays, FileText, Menu, ChevronLeft
+  CalendarDays, FileText, Menu, ChevronLeft, Settings
 } from 'lucide-react'
 
 export function Sidebar() {
   const pathname = usePathname()
   const { isFinance } = useApp()
-  const { t } = useLang()
+  const { t, lang } = useLang()
   const [collapsed, setCollapsed] = useState(false)
 
   const NAV = [
@@ -35,6 +35,8 @@ export function Sidebar() {
     { section: t.planning },
     { href: '/dashboard/schedule', label: t.schedule, icon: CalendarDays },
     { href: '/dashboard/reports', label: t.reports, icon: FileText },
+    { section: "System" },
+    { href: "/dashboard/settings", label: lang === "fr" ? "Paramètres" : "Settings", icon: Settings },
   ]
 
   return (
