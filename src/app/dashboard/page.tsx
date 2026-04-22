@@ -7,12 +7,36 @@ import { createClient } from '../../../lib/supabase'
 import { MetricCard, Card, CardHeader, ProgressBar, EmptyState } from '@/components/ui'
 import { Button } from '@/components/ui'
 import { fmt, pct } from '@/lib/utils'
-import { Users, CalendarCheck, Wallet, UserSquare2, Heart, TrendingUp, AlertTriangle } from 'lucide-react'
+import { Users, CalendarCheck, Wallet, UserSquare2, Heart, TrendingUp, AlertTriangle, Download } from "lucide-react"
 import Link from 'next/link'
 import type { KPI, Milestone, Report, Income, Expense } from '@/types'
 
 export default function DashboardPage() {
   const { activeProject, isFinance } = useApp()
+  const { lang } = useLang()
+  const [exporting, setExporting] = useState(false)
+
+  const exportReport = async () => {
+    if (!activeProject) return
+    setExporting(true)
+    try {
+      const res = await fetch("/api/export-pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: activeProject.id, lang }),
+      })
+      const html = await res.text()
+      const blob = new Blob([html], { type: "text/html" })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `${activeProject.name.replace(/[^a-z0-9]/gi, "_")}_report.html`
+      a.click()
+      URL.revokeObjectURL(url)
+    } finally {
+      setExporting(false)
+    }
+  }
   const { t } = useLang()
   const supabase = createClient()
 
@@ -92,7 +116,7 @@ export default function DashboardPage() {
       <div className="text-xs text-gray-400 mb-1">Workspace › Dashboard</div>
       <div className="mb-1">
         <div className="text-xs font-medium text-gray-400">{activeProject.project_type?.replace('_', ' ')} · AFRILEAD</div>
-        <h1 className="text-2xl font-bold text-gray-900 tracking-tight">{activeProject.name}</h1>
+        <div className="flex items-center justify-between"><h1 className="text-2xl font-bold text-gray-900 tracking-tight">{activeProject.name}</h1><button onClick={exportReport} disabled={exporting} className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-800 bg-white border border-gray-200 rounded-lg px-3 py-1.5 transition-colors disabled:opacity-50"><Download size={13}/>{exporting ? (lang === "fr" ? "Export..." : "Exporting...") : (lang === "fr" ? "Exporter rapport" : "Export report")}</button></div>
         <div className="text-sm text-gray-400">{activeProject.start_date} → {activeProject.end_date}</div>
       </div>
 
