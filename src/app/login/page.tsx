@@ -1,25 +1,39 @@
 'use client'
 
-import { useState } from 'react'
+import { Suspense, useState } from 'react'
 import { createClient } from '../../../lib/supabase'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useLang } from '@/context/LangContext'
+import { authErrorMessage } from '@/lib/authError'
+import { isAuthLinkErrorKey } from '@/lib/authLinkError'
 import Link from 'next/link'
 
-export default function LoginPage() {
+function LoginForm() {
   const { t, lang, setLang } = useLang()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const router = useRouter()
+  const params = useSearchParams()
   const supabase = createClient()
+
+  // /auth/callback redirects here with a reason when a confirmation or
+  // recovery link fails. Previously it sent ?error=auth and this page never
+  // read it, so the user arrived at a blank form with no idea why — and no way
+  // to tell that apart from never having clicked the link. Rendered from the
+  // key at render time, so it follows the language toggle.
+  const linkErrorKey = params.get('error')
+  const linkError = isAuthLinkErrorKey(linkErrorKey)
+    ? t.authLinkErrors[linkErrorKey]
+    // A reason we do not recognise is still a failure worth naming.
+    : linkErrorKey ? t.authErrors.generic : null
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true); setError('')
     const { error: err } = await supabase.auth.signInWithPassword({ email, password })
-    if (err) { setError(err.message); setLoading(false) }
+    if (err) { setError(authErrorMessage(err, t.authErrors) ?? t.authErrors.generic); setLoading(false) }
     else router.push('/dashboard')
   }
 
@@ -67,8 +81,10 @@ export default function LoginPage() {
                 className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm text-gray-900 bg-white focus:outline-none focus:border-indigo-400 transition-colors placeholder:text-gray-300" />
             </div>
 
-            {error && (
-              <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-xs text-red-700">{error}</div>
+            {(error || linkError) && (
+              <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-xs text-red-700">
+                {error || linkError}
+              </div>
             )}
 
             <button type="submit" disabled={loading}
@@ -90,5 +106,14 @@ export default function LoginPage() {
         <div className="text-center mt-6 text-xs text-gray-300">IMPACTOS · useimpactos.com</div>
       </div>
     </div>
+  )
+}
+
+export default function LoginPage() {
+  // useSearchParams requires a Suspense boundary.
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
   )
 }

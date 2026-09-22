@@ -22,7 +22,7 @@ export interface Profile {
   last_name: string
   email: string
   avatar_url?: string
-  role: 'owner' | 'finance_officer' | 'coordinator' | 'staff' | 'viewer'
+  role: 'owner' | 'finance' | 'coordinator' | 'staff' | 'viewer'
   is_active: boolean
   created_at: string
   updated_at: string
@@ -309,7 +309,7 @@ export interface DistributionEvent {
 
 // ─── App state ────────────────────────────────────────────────────────────────
 
-export type UserRole = 'owner' | 'finance_officer' | 'coordinator' | 'staff' | 'viewer'
+export type UserRole = 'owner' | 'finance' | 'coordinator' | 'staff' | 'viewer'
 
 export interface AppUser {
   id: string

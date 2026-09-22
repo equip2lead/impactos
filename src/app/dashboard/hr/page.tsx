@@ -1,8 +1,10 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import { useApp } from '@/hooks/useApp'
+import { useLang } from '@/context/LangContext'
+import { withTimeout } from '@/lib/withTimeout'
 import { createClient } from '../../../../lib/supabase'
-import { Button, Modal, Field, Input, Select, Table, TR, TD, Tabs, EmptyState } from '@/components/ui'
+import { Button, Modal, Field, Input, Select, Table, TR, TD, Tabs, EmptyState, Alert } from '@/components/ui'
 import { statusBadge } from '@/components/ui'
 import { Plus, Trash2, PlusCircle } from 'lucide-react'
 import { fmt } from '@/lib/utils'
@@ -12,8 +14,12 @@ const ORG_ID = 'a0000000-0000-0000-0000-000000000001'
 
 export default function HRPage() {
   const { activeProject, isAdmin, isFinance, orgId } = useApp()
+  const { t } = useLang()
   const supabase = createClient()
   const [tab, setTab] = useState('Roster')
+  // Minimal error slot: these screens had no way to report a failed or
+  // stalled write, so a hang left the button spinning with no explanation.
+  const [opError, setOpError] = useState<string | null>(null)
   const [staff, setStaff] = useState<(Staff & { assignments: StaffAssignment[] })[]>([])
   const [payroll, setPayroll] = useState<Payroll[]>([])
   const [leave, setLeave] = useState<LeaveRequest[]>([])
@@ -51,12 +57,17 @@ export default function HRPage() {
   const addStaff = async () => {
     if (!staffForm.fn || !staffForm.ln) return
     setSaving(true)
-    const { data: newStaff } = await supabase.from('staff').insert({
+    const raced = await withTimeout(Promise.resolve(supabase.from('staff').insert({
       org_id: ORG_ID, first_name: staffForm.fn, last_name: staffForm.ln,
       email: staffForm.email || null, role_title: staffForm.role || null,
       staff_type: staffForm.type, base_salary_usd: parseFloat(staffForm.salary) || 0,
       contract_end: staffForm.end || null, status: staffForm.status
-    }).select().single()
+    }).select().single()))
+    if (raced.timedOut) {
+      setSaving(false)
+      return setOpError('That took too long. Check your connection and try again.')
+    }
+    const { data: newStaff } = raced.value
     // Auto-assign to current project
     if (newStaff && activeProject) {
       await supabase.from('staff_project_assignments').insert({
@@ -92,8 +103,17 @@ export default function HRPage() {
     setOpenModal(null); setSaving(false); load()
   }
 
+
+  // An approval with no pending state looks identical to an approval that was
+  // refused: the request still reads pending. Disabling the control
+  // while the write is in flight is the difference between the two.
+  const [busyId, setBusyId] = useState<string | null>(null)
+
   const approveLeave = async (id: string) => {
-    await supabase.from('leave_requests').update({ status: 'approved' }).eq('id', id); load()
+    if (busyId) return
+    setBusyId(id)
+    await supabase.from('leave_requests').update({ status: 'approved' }).eq('id', id)
+    setBusyId(null); load()
   }
 
   const toggleAtt = (id: string) => {
@@ -108,7 +128,9 @@ export default function HRPage() {
     const assigned = staff.filter(s => s.assignments.length > 0)
     let present = 0, absent = 0
     assigned.forEach(s => { if(attGrid[s.id]==='p') present++; else if(attGrid[s.id]==='a') absent++ })
-    if (present + absent === 0) return alert('Mark at least one staff member.')
+    // An alert() blocks the page and says nothing the error slot cannot.
+    if (present + absent === 0) return setOpError(t.markAtLeastOneStaff)
+    setOpError(null)
     await supabase.from('staff_attendance_sessions').insert({
       project_id: activeProject.id, session_date: sessForm.date,
       session_type: sessForm.type, present_count: present, absent_count: absent
@@ -116,41 +138,52 @@ export default function HRPage() {
     setAttGrid({}); load()
   }
 
+  // Same double-count risk as the KPI increment: the count on screen is stale
+  // until the refetch lands, so a second click would send the same +1 again.
   const addPD = async (staffId: string, current: number) => {
-    await supabase.from('staff').update({ pd_events: (current||0)+1 }).eq('id', staffId); load()
+    if (busyId) return
+    setBusyId(staffId)
+    await supabase.from('staff').update({ pd_events: (current||0)+1 }).eq('id', staffId)
+    setBusyId(null); load()
   }
 
   const removeStaff = async (staffId: string) => {
-    if (!activeProject) return
+    if (!activeProject || busyId) return
+    setBusyId(staffId)
     await supabase.from('staff_project_assignments').update({ is_active: false }).eq('staff_id', staffId).eq('project_id', activeProject.id)
-    load()
+    setBusyId(null); load()
   }
 
-  if (!activeProject) return <div className="text-gray-400 text-sm p-4">Select a project first.</div>
+  if (!activeProject) return <div className="text-gray-400 text-sm p-4">{t.selectProjectFirst}</div>
 
   const assignedStaff = staff.filter(s => s.assignments.length > 0)
+  // Keys stay English so `tab` and the DB-facing comparisons below are stable
+  // across a language switch; only the label is translated. Same rule governs
+  // the <option> values in this file, whose text is written to the database —
+  // see "A string that carries identity needs its own handle" in AGENTS.md.
   const tabs = ['Roster', 'Staff attendance', ...(isFinance ? ['Payroll', 'Leave'] : [])]
+    .map(k => ({ key: k, label: t.hrTabs[k] ?? k }))
 
   return (
     <div>
-      <div className="text-xs text-gray-400 mb-1">Projects › {activeProject.name} › HR & Staff</div>
+      <div className="text-xs text-gray-400 mb-1">{t.projects} › {activeProject.name} › {t.hrStaff}</div>
       <div className="flex items-end justify-between mb-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">HR & Staff</h1>
-          <div className="text-xs text-gray-400">{assignedStaff.length} assigned to this project · {staff.length} total in AFRILEAD</div>
+          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">{t.hrStaff}</h1>
+          <div className="text-xs text-gray-400">{assignedStaff.length} {t.assignedToProject} · {staff.length} {t.totalInOrg}</div>
         </div>
-        {isAdmin && <Button variant="primary" size="sm" onClick={() => setOpenModal('staff')}><Plus size={13}/>Add staff</Button>}
+        {isAdmin && <Button variant="primary" size="sm" onClick={() => setOpenModal('staff')}><Plus size={13}/>{t.addStaff}</Button>}
       </div>
 
       <Tabs tabs={tabs} active={tab} onChange={setTab} />
 
       {tab === 'Roster' && (
-        <Table headers={['Name','Role','Type','Status','Contract end','Salary/mo','PD', isAdmin?'Actions':'']} empty={assignedStaff.length === 0}>
+        <Table headers={[t.name, t.role, t.type, t.status, t.contractEndShort, t.salaryMo, t.pd, isAdmin ? t.actions : '']} empty={assignedStaff.length === 0}>
           {assignedStaff.map(s => (
             <TR key={s.id}>
               <TD><span className="font-medium">{s.first_name} {s.last_name}</span>{s.email && <div className="text-xs text-gray-400">{s.email}</div>}</TD>
               <TD>{s.role_title ?? '—'}</TD>
-              <TD>{s.staff_type}</TD>
+              <TD>{t.staffTypes[s.staff_type ?? ''] ?? s.staff_type}</TD>
               <TD>{statusBadge(s.status ?? 'active')}</TD>
               <TD className="text-xs text-gray-400">{s.contract_end ?? '—'}</TD>
               <TD>{s.base_salary_usd ? fmt(s.base_salary_usd) : '—'}</TD>
@@ -158,8 +191,8 @@ export default function HRPage() {
               {isAdmin && (
                 <TD>
                   <div className="flex gap-1">
-                    <button onClick={() => addPD(s.id, s.pd_events ?? 0)} className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-0.5 rounded text-gray-600 flex items-center gap-1"><PlusCircle size={10}/>PD</button>
-                    <button onClick={() => removeStaff(s.id)} className="text-red-400 hover:text-red-600 ml-1"><Trash2 size={13}/></button>
+                    <button onClick={() => addPD(s.id, s.pd_events ?? 0)} disabled={busyId === s.id} className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-0.5 rounded text-gray-600 flex items-center gap-1 disabled:opacity-40 disabled:cursor-wait"><PlusCircle size={10}/>{t.pd}</button>
+                    <button onClick={() => removeStaff(s.id)} disabled={busyId === s.id} className="text-red-400 hover:text-red-600 ml-1 disabled:opacity-40 disabled:cursor-wait"><Trash2 size={13}/></button>
                   </div>
                 </TD>
               )}
@@ -171,13 +204,16 @@ export default function HRPage() {
       {tab === 'Staff attendance' && (
         <div className="space-y-4">
           <div className="bg-white border border-gray-100 rounded-xl p-4">
-            <div className="font-semibold text-sm text-gray-900 mb-3">Staff sign-in sheet</div>
+            <div className="font-semibold text-sm text-gray-900 mb-3">{t.signInSheet}</div>
+            {/* The other opError slot lives inside the add-staff modal, which is
+                never open on this tab, so the two cannot both render. */}
+            {opError && <div className="mb-3"><Alert>{opError}</Alert></div>}
             <div className="flex gap-3 mb-4 flex-wrap items-end">
-              <Field label="Session date" className="w-auto"><Input type="date" value={sessForm.date} onChange={e=>setSessForm(f=>({...f,date:e.target.value}))} style={{width:'auto'}}/></Field>
-              <Field label="Session type" className="w-auto"><Select value={sessForm.type} onChange={e=>setSessForm(f=>({...f,type:e.target.value}))} style={{width:'auto'}}><option>Training</option><option>Team meeting</option><option>Field work</option><option>Workshop</option></Select></Field>
-              {isAdmin && <Button variant="primary" size="sm" onClick={saveStaffSession}>Save sign-in</Button>}
+              <Field label={t.sessionDate} className="w-auto"><Input type="date" value={sessForm.date} onChange={e=>setSessForm(f=>({...f,date:e.target.value}))} style={{width:'auto'}}/></Field>
+              <Field label={t.sessionType} className="w-auto"><Select value={sessForm.type} onChange={e=>setSessForm(f=>({...f,type:e.target.value}))} style={{width:'auto'}}>{Object.keys(t.sessionTypes).map(k => <option key={k} value={k}>{t.sessionTypes[k]}</option>)}</Select></Field>
+              {isAdmin && <Button variant="primary" size="sm" onClick={saveStaffSession}>{t.saveSignIn}</Button>}
             </div>
-            {assignedStaff.length === 0 ? <div className="text-sm text-gray-400">Add staff first.</div> : (
+            {assignedStaff.length === 0 ? <div className="text-sm text-gray-400">{t.addStaffFirst}</div> : (
               <div className="grid grid-cols-6 sm:grid-cols-8 md:grid-cols-12 gap-2">
                 {assignedStaff.map(s => {
                   const st = attGrid[s.id] ?? ''
@@ -191,18 +227,18 @@ export default function HRPage() {
               </div>
             )}
             <div className="flex gap-4 mt-3 text-xs text-gray-400">
-              <span><span className="inline-block w-2 h-2 rounded-full bg-emerald-400 mr-1"/>Present</span>
-              <span><span className="inline-block w-2 h-2 rounded-full bg-red-400 mr-1"/>Absent</span>
-              <span><span className="inline-block w-2 h-2 rounded-full bg-gray-200 mr-1"/>Not marked</span>
+              <span><span className="inline-block w-2 h-2 rounded-full bg-emerald-400 mr-1"/>{t.present}</span>
+              <span><span className="inline-block w-2 h-2 rounded-full bg-red-400 mr-1"/>{t.absent}</span>
+              <span><span className="inline-block w-2 h-2 rounded-full bg-gray-200 mr-1"/>{t.notMarked}</span>
             </div>
           </div>
-          <Table headers={['Date','Session type','Present','Absent','Rate']} empty={staffSessions.length === 0}>
+          <Table headers={[t.date, t.sessionType, t.present, t.absent, t.rate]} empty={staffSessions.length === 0}>
             {staffSessions.map(s => {
               const tot = (s.present_count??0)+(s.absent_count??0)
               const rate = tot > 0 ? Math.round(((s.present_count??0)/tot)*100) : 0
               return (
                 <TR key={s.id}>
-                  <TD>{s.session_date}</TD><TD>{s.session_type}</TD>
+                  <TD>{s.session_date}</TD><TD>{t.sessionTypes[s.session_type ?? ''] ?? s.session_type}</TD>
                   <TD>{s.present_count??0}</TD><TD>{s.absent_count??0}</TD>
                   <TD><span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${rate>=80?'bg-emerald-50 text-emerald-700':'bg-amber-50 text-amber-700'}`}>{rate}%</span></TD>
                 </TR>
@@ -214,8 +250,8 @@ export default function HRPage() {
 
       {tab === 'Payroll' && isFinance && (
         <div className="space-y-4">
-          <div className="flex justify-end"><Button variant="finance" size="sm" onClick={()=>setOpenModal('payroll')}><Plus size={13}/>Log payment</Button></div>
-          <Table headers={['Date','Staff member','Period','Amount','Notes']} empty={payroll.length===0}>
+          <div className="flex justify-end"><Button variant="finance" size="sm" onClick={()=>setOpenModal('payroll')}><Plus size={13}/>{t.logPayment}</Button></div>
+          <Table headers={[t.date, t.staffMember, t.period, t.amount, t.notes]} empty={payroll.length===0}>
             {payroll.map(p => (
               <TR key={p.id}>
                 <TD>{p.paid_date}</TD>
@@ -231,15 +267,15 @@ export default function HRPage() {
 
       {tab === 'Leave' && isFinance && (
         <div className="space-y-4">
-          <div className="flex justify-end"><Button variant="secondary" size="sm" onClick={()=>setOpenModal('leave')}><Plus size={13}/>Request leave</Button></div>
-          <Table headers={['Staff','From','To','Type','Status','Actions']} empty={leave.length===0}>
+          <div className="flex justify-end"><Button variant="secondary" size="sm" onClick={()=>setOpenModal('leave')}><Plus size={13}/>{t.requestLeave}</Button></div>
+          <Table headers={[t.staff, t.from, t.to, t.type, t.status, t.actions]} empty={leave.length===0}>
             {leave.map(r => (
               <TR key={r.id}>
                 <TD>{r.staff ? `${(r.staff as {first_name:string;last_name:string}).first_name} ${(r.staff as {first_name:string;last_name:string}).last_name}` : '—'}</TD>
                 <TD>{r.from_date ?? '—'}</TD><TD>{r.to_date ?? '—'}</TD>
-                <TD>{r.leave_type}</TD>
+                <TD>{t.leaveTypes[r.leave_type ?? ''] ?? r.leave_type}</TD>
                 <TD>{statusBadge(r.status)}</TD>
-                <TD>{r.status === 'pending' && isAdmin && <button onClick={()=>approveLeave(r.id)} className="text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded hover:bg-emerald-100">Approve</button>}</TD>
+                <TD>{r.status === 'pending' && isAdmin && <button onClick={()=>approveLeave(r.id)} disabled={busyId === r.id} className="text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded hover:bg-emerald-100 disabled:opacity-40 disabled:cursor-wait">{t.approve}</button>}</TD>
               </TR>
             ))}
           </Table>
@@ -247,53 +283,54 @@ export default function HRPage() {
       )}
 
       {/* Add staff modal */}
-      <Modal open={openModal==='staff'} onClose={()=>setOpenModal(null)} title="Add staff member"
-        footer={<><Button variant="secondary" onClick={()=>setOpenModal(null)}>Cancel</Button><Button variant="primary" onClick={addStaff} disabled={saving}>{saving?'Saving…':'Add staff'}</Button></>}>
+      <Modal open={openModal==='staff'} onClose={()=>setOpenModal(null)} title={t.addStaffMember}
+        footer={<><Button variant="secondary" onClick={()=>setOpenModal(null)}>{t.cancel}</Button><Button variant="primary" onClick={addStaff} disabled={saving}>{saving ? t.saving : t.addStaff}</Button></>}>
         <div className="space-y-3">
+          <Alert>{opError}</Alert>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="First name"><Input value={staffForm.fn} onChange={e=>setStaffForm(f=>({...f,fn:e.target.value}))} placeholder="Denis"/></Field>
-            <Field label="Last name"><Input value={staffForm.ln} onChange={e=>setStaffForm(f=>({...f,ln:e.target.value}))} placeholder="Ekobena"/></Field>
+            <Field label={t.firstName}><Input value={staffForm.fn} onChange={e=>setStaffForm(f=>({...f,fn:e.target.value}))} placeholder="Denis"/></Field>
+            <Field label={t.lastName}><Input value={staffForm.ln} onChange={e=>setStaffForm(f=>({...f,ln:e.target.value}))} placeholder="Ekobena"/></Field>
           </div>
-          <Field label="Role title"><Input value={staffForm.role} onChange={e=>setStaffForm(f=>({...f,role:e.target.value}))} placeholder="Academic Director"/></Field>
+          <Field label={t.roleTitle}><Input value={staffForm.role} onChange={e=>setStaffForm(f=>({...f,role:e.target.value}))} placeholder="Academic Director"/></Field>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Email"><Input type="email" value={staffForm.email} onChange={e=>setStaffForm(f=>({...f,email:e.target.value}))}/></Field>
-            <Field label="Type"><Select value={staffForm.type} onChange={e=>setStaffForm(f=>({...f,type:e.target.value}))}><option value="full-time">Full-time</option><option value="part-time">Part-time</option><option value="volunteer">Volunteer</option><option value="contractor">Contractor</option></Select></Field>
+            <Field label={t.email}><Input type="email" value={staffForm.email} onChange={e=>setStaffForm(f=>({...f,email:e.target.value}))}/></Field>
+            <Field label={t.type}><Select value={staffForm.type} onChange={e=>setStaffForm(f=>({...f,type:e.target.value}))}>{Object.keys(t.staffTypes).map(k => <option key={k} value={k}>{t.staffTypes[k]}</option>)}</Select></Field>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Salary / mo (USD)"><Input type="number" value={staffForm.salary} onChange={e=>setStaffForm(f=>({...f,salary:e.target.value}))} min="0"/></Field>
-            <Field label="Contract end"><Input type="date" value={staffForm.end} onChange={e=>setStaffForm(f=>({...f,end:e.target.value}))}/></Field>
+            <Field label={t.salaryPerMonth}><Input type="number" value={staffForm.salary} onChange={e=>setStaffForm(f=>({...f,salary:e.target.value}))} min="0"/></Field>
+            <Field label={t.contractEnd}><Input type="date" value={staffForm.end} onChange={e=>setStaffForm(f=>({...f,end:e.target.value}))}/></Field>
           </div>
         </div>
       </Modal>
 
       {/* Payroll modal */}
-      <Modal open={openModal==='payroll'} onClose={()=>setOpenModal(null)} title="Log payroll disbursement"
-        footer={<><Button variant="secondary" onClick={()=>setOpenModal(null)}>Cancel</Button><Button variant="finance" onClick={addPayroll} disabled={saving}>{saving?'Saving…':'Log payment'}</Button></>}>
+      <Modal open={openModal==='payroll'} onClose={()=>setOpenModal(null)} title={t.logPayrollDisbursement}
+        footer={<><Button variant="secondary" onClick={()=>setOpenModal(null)}>{t.cancel}</Button><Button variant="finance" onClick={addPayroll} disabled={saving}>{saving ? t.saving : t.logPayment}</Button></>}>
         <div className="space-y-3">
-          <Field label="Staff member"><Select value={payForm.staff_id} onChange={e=>setPayForm(f=>({...f,staff_id:e.target.value}))}><option value="">— Select —</option>{assignedStaff.map(s=><option key={s.id} value={s.id}>{s.first_name} {s.last_name}</option>)}</Select></Field>
+          <Field label={t.staffMember}><Select value={payForm.staff_id} onChange={e=>setPayForm(f=>({...f,staff_id:e.target.value}))}><option value="">{t.selectPlaceholder}</option>{assignedStaff.map(s=><option key={s.id} value={s.id}>{s.first_name} {s.last_name}</option>)}</Select></Field>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Amount (USD)"><Input type="number" value={payForm.amount} onChange={e=>setPayForm(f=>({...f,amount:e.target.value}))} min="0"/></Field>
-            <Field label="Period"><Input value={payForm.period} onChange={e=>setPayForm(f=>({...f,period:e.target.value}))} placeholder="Sep 2026"/></Field>
+            <Field label={t.amountPaid}><Input type="number" value={payForm.amount} onChange={e=>setPayForm(f=>({...f,amount:e.target.value}))} min="0"/></Field>
+            <Field label={t.period}><Input value={payForm.period} onChange={e=>setPayForm(f=>({...f,period:e.target.value}))} placeholder="Sep 2026"/></Field>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Date paid"><Input type="date" value={payForm.date} onChange={e=>setPayForm(f=>({...f,date:e.target.value}))}/></Field>
-            <Field label="Notes"><Input value={payForm.notes} onChange={e=>setPayForm(f=>({...f,notes:e.target.value}))} placeholder="Optional"/></Field>
+            <Field label={t.datePaid}><Input type="date" value={payForm.date} onChange={e=>setPayForm(f=>({...f,date:e.target.value}))}/></Field>
+            <Field label={t.notes}><Input value={payForm.notes} onChange={e=>setPayForm(f=>({...f,notes:e.target.value}))} placeholder={t.optional}/></Field>
           </div>
         </div>
       </Modal>
 
       {/* Leave modal */}
-      <Modal open={openModal==='leave'} onClose={()=>setOpenModal(null)} title="Submit leave request"
-        footer={<><Button variant="secondary" onClick={()=>setOpenModal(null)}>Cancel</Button><Button variant="primary" onClick={addLeave} disabled={saving}>{saving?'Saving…':'Submit'}</Button></>}>
+      <Modal open={openModal==='leave'} onClose={()=>setOpenModal(null)} title={t.submitLeaveRequest}
+        footer={<><Button variant="secondary" onClick={()=>setOpenModal(null)}>{t.cancel}</Button><Button variant="primary" onClick={addLeave} disabled={saving}>{saving ? t.saving : t.submit}</Button></>}>
         <div className="space-y-3">
-          <Field label="Staff member"><Select value={leaveForm.staff_id} onChange={e=>setLeaveForm(f=>({...f,staff_id:e.target.value}))}><option value="">— Select —</option>{staff.map(s=><option key={s.id} value={s.id}>{s.first_name} {s.last_name}</option>)}</Select></Field>
+          <Field label={t.staffMember}><Select value={leaveForm.staff_id} onChange={e=>setLeaveForm(f=>({...f,staff_id:e.target.value}))}><option value="">{t.selectPlaceholder}</option>{staff.map(s=><option key={s.id} value={s.id}>{s.first_name} {s.last_name}</option>)}</Select></Field>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="From"><Input type="date" value={leaveForm.from} onChange={e=>setLeaveForm(f=>({...f,from:e.target.value}))}/></Field>
-            <Field label="To"><Input type="date" value={leaveForm.to} onChange={e=>setLeaveForm(f=>({...f,to:e.target.value}))}/></Field>
+            <Field label={t.from}><Input type="date" value={leaveForm.from} onChange={e=>setLeaveForm(f=>({...f,from:e.target.value}))}/></Field>
+            <Field label={t.to}><Input type="date" value={leaveForm.to} onChange={e=>setLeaveForm(f=>({...f,to:e.target.value}))}/></Field>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Type"><Select value={leaveForm.type} onChange={e=>setLeaveForm(f=>({...f,type:e.target.value}))}><option>Annual leave</option><option>Sick leave</option><option>Maternity/Paternity</option><option>Unpaid</option></Select></Field>
-            <Field label="Status"><Select value={leaveForm.status} onChange={e=>setLeaveForm(f=>({...f,status:e.target.value}))}><option value="pending">Pending</option><option value="approved">Approved</option></Select></Field>
+            <Field label={t.type}><Select value={leaveForm.type} onChange={e=>setLeaveForm(f=>({...f,type:e.target.value}))}>{Object.keys(t.leaveTypes).map(k => <option key={k} value={k}>{t.leaveTypes[k]}</option>)}</Select></Field>
+            <Field label={t.status}><Select value={leaveForm.status} onChange={e=>setLeaveForm(f=>({...f,status:e.target.value}))}>{Object.keys(t.leaveStatuses).map(k => <option key={k} value={k}>{t.leaveStatuses[k]}</option>)}</Select></Field>
           </div>
         </div>
       </Modal>

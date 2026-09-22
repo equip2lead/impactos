@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState } from 'react'
 import { useApp } from '@/hooks/useApp'
 import { createClient } from '../../../../lib/supabase'
 import { Button, Modal, Field, Input, Card, ProgressBar, EmptyState } from '@/components/ui'
@@ -14,13 +14,20 @@ export default function KPIsPage() {
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({ name:'', target:'', current:'0', unit:'' })
 
-  const load = useCallback(async () => {
-    if (!activeProject) return
-    const { data } = await supabase.from('kpis').select('*').eq('project_id', activeProject.id).order('sort_order')
-    setKpis((data ?? []) as KPI[])
-  }, [activeProject]) // eslint-disable-line
+  // Bumped by mutations to re-run the fetch below. The effect owns the query so
+  // a project switch mid-flight cannot land stale rows.
+  const [reloadKey, setReloadKey] = useState(0)
+  const load = () => setReloadKey(k => k + 1)
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    if (!activeProject) return
+    let cancelled = false
+    ;(async () => {
+      const { data } = await supabase.from('kpis').select('*').eq('project_id', activeProject.id).order('sort_order')
+      if (!cancelled) setKpis((data ?? []) as KPI[])
+    })()
+    return () => { cancelled = true }
+  }, [activeProject, reloadKey]) // eslint-disable-line
 
   const addKPI = async () => {
     if (!form.name || !form.target || !activeProject) return
@@ -34,12 +41,26 @@ export default function KPIsPage() {
     setOpen(false); setSaving(false); load()
   }
 
+
+  // An increment with no pending state looks identical to a write that was
+  // refused: the row is still there and nothing moved. Disabling the control
+  // while the write is in flight is the difference between the two.
+  const [busyId, setBusyId] = useState<string | null>(null)
+
+  // Double-counting is the specific risk here: the figure on screen is stale
+  // until the refetch lands, so a second click would send the same +1 again.
   const increment = async (kpi: KPI) => {
-    await supabase.from('kpis').update({ current_val: kpi.current_val + 1 }).eq('id', kpi.id); load()
+    if (busyId) return
+    setBusyId(kpi.id)
+    await supabase.from('kpis').update({ current_val: kpi.current_val + 1 }).eq('id', kpi.id)
+    setBusyId(null); load()
   }
 
   const deleteKPI = async (id: string) => {
-    await supabase.from('kpis').delete().eq('id', id); load()
+    if (busyId) return
+    setBusyId(id)
+    await supabase.from('kpis').delete().eq('id', id)
+    setBusyId(null); load()
   }
 
   if (!activeProject) return <div className="text-gray-400 text-sm p-4">Select a project first.</div>
@@ -74,8 +95,8 @@ export default function KPIsPage() {
                         <span className="text-sm font-bold text-gray-900">{k.current_val}/{k.target_val}</span>
                         <span className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: color+'20', color }}>{pct}%</span>
                         {isAdmin && <>
-                          <button onClick={() => increment(k)} className="text-gray-400 hover:text-indigo-600 transition-colors"><PlusCircle size={14}/></button>
-                          <button onClick={() => deleteKPI(k.id)} className="text-gray-300 hover:text-red-500 transition-colors"><Trash2 size={13}/></button>
+                          <button onClick={() => increment(k)} disabled={busyId === k.id} className="text-gray-400 hover:text-indigo-600 transition-colors disabled:opacity-40 disabled:cursor-wait"><PlusCircle size={14}/></button>
+                          <button onClick={() => deleteKPI(k.id)} disabled={busyId === k.id} className="text-gray-300 hover:text-red-500 transition-colors disabled:opacity-40 disabled:cursor-wait"><Trash2 size={13}/></button>
                         </>}
                       </div>
                     </div>

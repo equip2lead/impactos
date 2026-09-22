@@ -2,16 +2,23 @@
 
 import { useState } from 'react'
 import { createClient } from '../../../lib/supabase'
+import { withTimeout } from '@/lib/withTimeout'
+import { authErrorMessage as authMessage } from '@/lib/authError'
 import { useRouter } from 'next/navigation'
+import { useLang } from '@/context/LangContext'
 import Link from 'next/link'
 
 type Step = 'org' | 'account' | 'done'
 
 export default function RegisterPage() {
   const [step, setStep] = useState<Step>('org')
-  const [lang, setLang] = useState<'en'|'fr'>('en')
+  // The toggle drives the app-wide language (and its cookie) rather than a
+  // local copy — otherwise picking French here is forgotten at the dashboard.
+  // T is the shared table; t below is the copy specific to this screen.
+  const { lang, setLang, t: T } = useLang()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [needsConfirmation, setNeedsConfirmation] = useState(false)
   const router = useRouter()
   const supabase = createClient()
 
@@ -41,6 +48,10 @@ export default function RegisterPage() {
       types: { ngo: 'NGO / Non-profit', church: 'Church / Faith organisation', academy: 'Training academy', government: 'Government program', enterprise: 'Social enterprise', csr: 'CSR / Foundation', other: 'Other' },
       passwordMismatch: 'Passwords do not match',
       passwordShort: 'Password must be at least 8 characters',
+      orgNameRequired: 'Enter a name for your organisation',
+      confirmTitle: 'Check your email',
+      confirmSub: 'Your workspace is created. Confirm your email address to sign in for the first time.',
+      doneSubReady: 'Your IMPACTOS workspace is ready and you are signed in.',
     },
     fr: {
       title: 'Créer votre espace IMPACTOS',
@@ -60,6 +71,10 @@ export default function RegisterPage() {
       types: { ngo: 'ONG / Association', church: 'Église / Organisation religieuse', academy: 'Académie de formation', government: 'Programme gouvernemental', enterprise: 'Entreprise sociale', csr: 'RSE / Fondation', other: 'Autre' },
       passwordMismatch: 'Les mots de passe ne correspondent pas',
       passwordShort: 'Le mot de passe doit contenir au moins 8 caractères',
+      orgNameRequired: 'Saisissez un nom pour votre organisation',
+      confirmTitle: 'Vérifiez votre e-mail',
+      confirmSub: "Votre espace est créé. Confirmez votre adresse e-mail pour vous connecter la première fois.",
+      doneSubReady: 'Votre espace IMPACTOS est prêt et vous êtes connecté.',
     }
   }[lang]
 
@@ -69,52 +84,61 @@ export default function RegisterPage() {
   const handleCreateWorkspace = async () => {
     if (account.password !== account.confirm) return setError(t.passwordMismatch)
     if (account.password.length < 8) return setError(t.passwordShort)
+    if (!org.name.trim()) return setError(t.orgNameRequired)
     setLoading(true)
     setError('')
 
-    // 1. Create organisation
-    const slug = org.name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').slice(0, 40) + '-' + Date.now().toString(36)
-    const { data: orgData, error: orgErr } = await supabase
-      .from('organisations')
-      .insert({
-        name: org.name, slug, city: org.city || null,
-        country: org.country || null, email: org.email || null,
-        phone: org.phone || null, website: org.website || null,
-        description: org.type,
-      })
-      .select().single()
-
-    if (orgErr) { setError(orgErr.message); setLoading(false); return }
-
-    // 2. Create auth user
-    const { data: authData, error: authErr } = await supabase.auth.signUp({
+    // One call. handle_new_user creates the profile, the organisation and the
+    // ownership binding in a single transaction, so a failed signup cannot
+    // leave an ownerless organisation behind — which is what the previous
+    // version did by inserting the organisation from the browser first.
+    //
+    // role and org_id are deliberately NOT sent: the trigger ignores them, and
+    // a client that could name its own role would be choosing its own
+    // permissions. The slug is generated server-side too.
+    const raced = await withTimeout(supabase.auth.signUp({
       email: account.email,
       password: account.password,
       options: {
+        // Explicit, derived from the host that actually initiated signup.
+        // Without this the link goes to the project's configured Site URL, so
+        // a signup started on localhost sends the customer to production —
+        // a different build from the one being exercised. Correct for dev and
+        // production both, and independent of a dashboard setting.
+        //
+        // THE QUERY STRING HERE IS LOAD-BEARING. The Confirm signup email
+        // template appends to this value directly:
+        //
+        //   <a href="{{ .RedirectTo }}&token_hash={{ .TokenHash }}&type=email">
+        //
+        // so it concatenates with `&`, not `?`. If this URL ever loses its
+        // `?next=…` the template produces `/auth/callback&token_hash=…`, which
+        // is a path, not a query — the callback would see no token and send
+        // the user to /login as an invalid link. Keep a query parameter here.
+        emailRedirectTo: `${window.location.origin}/auth/callback?next=/dashboard`,
         data: {
           first_name: account.firstName,
           last_name: account.lastName,
-          role: 'owner',
-          org_id: orgData.id,
-        }
-      }
-    })
+          org_name: org.name.trim(),
+          org_details: {
+            city: org.city, country: org.country, email: org.email,
+            phone: org.phone, website: org.website, description: org.type,
+          },
+        },
+      },
+    }))
 
-    if (authErr) { setError(authErr.message); setLoading(false); return }
-
-    // 3. Create profile
-    if (authData.user) {
-      await supabase.from('profiles').upsert({
-        id: authData.user.id,
-        org_id: orgData.id,
-        first_name: account.firstName,
-        last_name: account.lastName,
-        email: account.email,
-        role: 'owner',
-        is_active: true,
-      })
+    if (raced.timedOut) { setLoading(false); return setError(T.procErrors.timeout) }
+    const { data, error: authErr } = raced.value
+    if (authErr) {
+      setLoading(false)
+      return setError(authMessage(authErr, T.authErrors) ?? T.procErrors.generic)
     }
 
+    // With email confirmation on, signUp returns no session. Saying "signed
+    // in" then bouncing off the dashboard would be worse than saying nothing,
+    // so the final screen reflects which actually happened.
+    setNeedsConfirmation(!data.session)
     setLoading(false)
     setStep('done')
   }
@@ -201,7 +225,8 @@ export default function RegisterPage() {
                   <input value={org.website} onChange={e => setOrg(o => ({ ...o, website: e.target.value }))} placeholder="yourorg.org" style={inputStyle} />
                 </div>
               </div>
-              <button onClick={() => org.name ? setStep('account') : setError('Organisation name is required')}
+              {error && <div style={errorBoxStyle}>{error}</div>}
+              <button onClick={() => org.name.trim() ? setStep('account') : setError(t.orgNameRequired)}
                 style={btnStyle('#0A0A0A', '#fff')}>{t.next}</button>
             </div>
           )}
@@ -231,7 +256,7 @@ export default function RegisterPage() {
                 <label style={{ fontSize: '11px', fontWeight: 600, color: '#555', display: 'block', marginBottom: '4px' }}>{t.confirm} *</label>
                 <input type="password" value={account.confirm} onChange={e => setAccount(a => ({ ...a, confirm: e.target.value }))} style={inputStyle} />
               </div>
-              {error && <div style={{ background: '#FEF2F2', border: '0.5px solid #FECDCA', borderRadius: '8px', padding: '10px', fontSize: '12px', color: '#DC2626' }}>{error}</div>}
+              {error && <div style={errorBoxStyle}>{error}</div>}
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button onClick={() => setStep('org')} style={btnStyle('#F4F6FA', '#0A0A0A')}>{t.back}</button>
                 <button onClick={handleCreateWorkspace} disabled={loading} style={{ ...btnStyle('#0A0A0A', '#fff'), flex: 1, opacity: loading ? 0.7 : 1 }}>
@@ -244,10 +269,18 @@ export default function RegisterPage() {
           {/* DONE */}
           {step === 'done' && (
             <div style={{ textAlign: 'center', padding: '12px 0' }}>
-              <div style={{ width: '56px', height: '56px', background: '#ECFDF5', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', fontSize: '24px' }}>✅</div>
-              <h2 style={{ fontSize: '20px', fontWeight: 800, letterSpacing: '-0.5px', marginBottom: '8px' }}>{t.doneTitle}</h2>
-              <p style={{ fontSize: '13px', color: '#888', marginBottom: '24px', lineHeight: 1.6 }}>{t.doneSub}</p>
-              <button onClick={() => router.push('/dashboard')} style={btnStyle('#0A0A0A', '#fff')}>{t.goToApp}</button>
+              <div style={{ width: '56px', height: '56px', background: needsConfirmation ? '#FFFBEB' : '#ECFDF5', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', fontSize: '24px' }}>
+                {needsConfirmation ? '✉️' : '✅'}
+              </div>
+              <h2 style={{ fontSize: '20px', fontWeight: 800, letterSpacing: '-0.5px', marginBottom: '8px' }}>
+                {needsConfirmation ? t.confirmTitle : t.doneTitle}
+              </h2>
+              <p style={{ fontSize: '13px', color: '#888', marginBottom: '24px', lineHeight: 1.6 }}>
+                {needsConfirmation ? t.confirmSub : t.doneSubReady}
+              </p>
+              {needsConfirmation
+                ? <Link href="/login" style={{ ...btnStyle('#0A0A0A', '#fff'), display: 'block', textDecoration: 'none', textAlign: 'center' }}>{t.signIn}</Link>
+                : <button onClick={() => router.push('/dashboard')} style={btnStyle('#0A0A0A', '#fff')}>{t.goToApp}</button>}
             </div>
           )}
         </div>
@@ -261,6 +294,11 @@ export default function RegisterPage() {
       </div>
     </div>
   )
+}
+
+const errorBoxStyle: React.CSSProperties = {
+  background: '#FEF2F2', border: '0.5px solid #FECDCA', borderRadius: '8px',
+  padding: '10px', fontSize: '12px', color: '#DC2626',
 }
 
 const inputStyle: React.CSSProperties = {

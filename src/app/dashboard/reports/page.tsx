@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState } from 'react'
 import { useApp } from '@/hooks/useApp'
 import { createClient } from '../../../../lib/supabase'
 import { Button, Modal, Field, Input, Select, Table, TR, TD } from '@/components/ui'
@@ -15,13 +15,21 @@ export default function ReportsPage() {
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({ name:'', freq:'Monthly', due:'', recip:'' })
 
-  const load = useCallback(async () => {
-    if (!activeProject) return
-    const { data } = await supabase.from('reports').select('*').eq('project_id', activeProject.id).order('due_date')
-    setReports((data ?? []) as Report[])
-  }, [activeProject]) // eslint-disable-line
+  // Bumped by mutations to re-run the fetch below. The effect owns the query so
+  // a project switch mid-flight cannot land stale rows.
+  const [reloadKey, setReloadKey] = useState(0)
+  const load = () => setReloadKey(k => k + 1)
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    if (!activeProject) return
+    let cancelled = false
+    ;(async () => {
+      const { data } = await supabase.from('reports').select('*').eq('project_id', activeProject.id).order('due_date')
+      if (cancelled) return
+      setReports((data ?? []) as Report[])
+    })()
+    return () => { cancelled = true }
+  }, [activeProject, reloadKey]) // eslint-disable-line
 
   const addReport = async () => {
     if (!form.name || !activeProject) return
@@ -34,8 +42,17 @@ export default function ReportsPage() {
     setOpen(false); setSaving(false); load()
   }
 
+
+  // A write with no pending state looks identical to a write that was
+  // refused: the badge still reads the old status. Disabling the control
+  // while the write is in flight is the difference between the two.
+  const [busyId, setBusyId] = useState<string | null>(null)
+
   const markSubmitted = async (id: string) => {
-    await supabase.from('reports').update({ status: 'submitted', submitted_at: new Date().toISOString() }).eq('id', id); load()
+    if (busyId) return
+    setBusyId(id)
+    await supabase.from('reports').update({ status: 'submitted', submitted_at: new Date().toISOString() }).eq('id', id)
+    setBusyId(null); load()
   }
 
   if (!activeProject) return <div className="text-gray-400 text-sm p-4">Select a project first.</div>
@@ -72,7 +89,7 @@ export default function ReportsPage() {
             {isAdmin && (
               <TD>
                 {r.status !== 'submitted' && (
-                  <button onClick={() => markSubmitted(r.id)} className="flex items-center gap-1 text-xs text-emerald-600 hover:text-emerald-800 font-medium">
+                  <button onClick={() => markSubmitted(r.id)} disabled={busyId === r.id} className="flex items-center gap-1 text-xs text-emerald-600 hover:text-emerald-800 font-medium disabled:opacity-40 disabled:cursor-wait">
                     <CheckCircle size={12}/>Mark submitted
                   </button>
                 )}

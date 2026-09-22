@@ -8,7 +8,7 @@ import { useState } from 'react'
 import type { Project } from '@/types'
 
 export function Topbar() {
-  const { activeProject, setActiveProject, projects, role, profile, signOut } = useApp()
+  const { activeProject, setActiveProject, projects, role, profile, signOut, loading } = useApp()
   const { lang, setLang, t } = useLang()
   const [projOpen, setProjOpen] = useState(false)
   const [userOpen, setUserOpen] = useState(false)
@@ -19,7 +19,7 @@ export function Topbar() {
 
   const roleLabel: Record<string, string> = {
     owner: lang === 'fr' ? 'Propriétaire' : 'Owner',
-    finance_officer: lang === 'fr' ? 'Finance' : 'Finance Officer',
+    finance: lang === 'fr' ? 'Finance' : 'Finance Officer',
     coordinator: lang === 'fr' ? 'Coordinateur' : 'Coordinator',
     staff: lang === 'fr' ? 'Personnel' : 'Staff',
     viewer: lang === 'fr' ? 'Observateur' : 'Viewer',
@@ -101,9 +101,9 @@ export function Topbar() {
             className="flex items-center gap-2">
             <div className="text-right hidden sm:block">
               <div className="text-xs font-medium text-gray-700 leading-none">
-                {profile ? `${profile.first_name} ${profile.last_name}` : 'Dr. Denis Ekobena'}
+                {profile ? `${profile.first_name} ${profile.last_name}` : (loading ? '…' : t.profileUnavailable)}
               </div>
-              <div className="text-[10px] text-gray-400 mt-0.5">{roleLabel[role] || role}</div>
+              <div className="text-[10px] text-gray-400 mt-0.5">{profile ? (roleLabel[role] || role) : '—'}</div>
             </div>
             <div className="w-7 h-7 bg-gray-900 rounded-full flex items-center justify-center text-[9px] font-bold text-amber-400">
               {avatarText}
@@ -114,7 +114,7 @@ export function Topbar() {
             <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg z-50 w-44 py-1">
               <div className="px-3 py-2 border-b border-gray-100">
                 <div className="text-xs font-semibold text-gray-900">
-                  {profile ? `${profile.first_name} ${profile.last_name}` : 'Dr. Denis Ekobena'}
+                  {profile ? `${profile.first_name} ${profile.last_name}` : (loading ? '…' : t.profileUnavailable)}
                 </div>
                 <div className="text-[10px] text-gray-400">{profile?.email}</div>
               </div>

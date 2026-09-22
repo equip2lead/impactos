@@ -48,8 +48,17 @@ export default function ParticipantsPage() {
     setOpen(false); setSaving(false); load()
   }
 
+
+  // A delete with no pending state looks identical to a delete that was
+  // refused: the row is still there and nothing moved. Disabling the control
+  // while the write is in flight is the difference between the two.
+  const [busyId, setBusyId] = useState<string | null>(null)
+
   const removeParticipant = async (id: string) => {
-    await supabase.from('participants').delete().eq('id', id); load()
+    if (busyId) return
+    setBusyId(id)
+    await supabase.from('participants').delete().eq('id', id)
+    setBusyId(null); load()
   }
 
   const addBulk = async () => {
@@ -65,7 +74,10 @@ export default function ParticipantsPage() {
   }
 
   const removeBulk = async (id: string) => {
-    await supabase.from('bulk_beneficiary_entries').delete().eq('id', id); load()
+    if (busyId) return
+    setBusyId(id)
+    await supabase.from('bulk_beneficiary_entries').delete().eq('id', id)
+    setBusyId(null); load()
   }
 
   const filtered = participants.filter(p =>
@@ -112,7 +124,7 @@ export default function ParticipantsPage() {
                 <TD>{p.group_location ?? '—'}</TD>
                 <TD>{p.baseline_level ? <span className="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-medium">{p.baseline_level}</span> : '—'}</TD>
                 <TD>{statusBadge(p.status ?? 'Active')}</TD>
-                {isAdmin && <TD><button onClick={() => removeParticipant(p.id)} className="text-red-400 hover:text-red-600"><Trash2 size={13} /></button></TD>}
+                {isAdmin && <TD><button onClick={() => removeParticipant(p.id)} disabled={busyId === p.id} className="text-red-400 hover:text-red-600 disabled:opacity-40 disabled:cursor-wait"><Trash2 size={13} /></button></TD>}
               </TR>
             ))}
           </Table>
@@ -133,7 +145,7 @@ export default function ParticipantsPage() {
                 <TD><span className="text-xs bg-cyan-50 text-cyan-700 px-2 py-0.5 rounded-full font-medium">{e.category}</span></TD>
                 <TD><span className="font-bold">{(e.count ?? 0).toLocaleString()}</span></TD>
                 <TD>{e.notes ?? '—'}</TD>
-                {isAdmin && <TD><button onClick={() => removeBulk(e.id)} className="text-red-400 hover:text-red-600"><Trash2 size={13} /></button></TD>}
+                {isAdmin && <TD><button onClick={() => removeBulk(e.id)} disabled={busyId === e.id} className="text-red-400 hover:text-red-600 disabled:opacity-40 disabled:cursor-wait"><Trash2 size={13} /></button></TD>}
               </TR>
             ))}
           </Table>

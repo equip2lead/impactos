@@ -154,7 +154,11 @@ export default function DashboardPage() {
         <MetricCard
           label="Donors" value={donorCount} sub="active grants"
           icon={<Heart size={13} className="text-violet-600" />} iconBg="bg-violet-50"
-          trend={{ label: fmt(totalIncome) + ' secured', color: 'bg-emerald-50 text-emerald-600' }}
+          // Income is finance-only under RLS: non-finance roles get zero rows,
+          // so showing the sum would render "hidden" as a factual $0.
+          trend={isFinance
+            ? { label: `${fmt(totalIncome)} ${t.secured}`, color: 'bg-emerald-50 text-emerald-600' }
+            : { label: t.hiddenFigure, color: 'bg-gray-100 text-gray-500' }}
         />
       </div>
 

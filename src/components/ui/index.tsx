@@ -140,6 +140,18 @@ export function Textarea({ className, ...props }: TextareaHTMLAttributes<HTMLTex
   )
 }
 
+// ── Alert ────────────────────────────────────────
+// Surfaces database trigger / constraint messages verbatim. Renders nothing
+// when there is no message, so it can sit unconditionally in a form.
+export function Alert({ children, className }: { children?: ReactNode; className?: string }) {
+  if (!children) return null
+  return (
+    <div className={cn('bg-red-50 text-red-700 border border-red-200 rounded-lg px-3 py-2 text-xs font-medium leading-relaxed', className)}>
+      {children}
+    </div>
+  )
+}
+
 // ── Empty state ───────────────────────────────────────
 export function EmptyState({ title, sub, action }: { title: string; sub?: string; action?: ReactNode }) {
   return (
@@ -152,16 +164,28 @@ export function EmptyState({ title, sub, action }: { title: string; sub?: string
 }
 
 // ── Tabs ──────────────────────────────────────────────
+/**
+ * Pass plain strings where the label is also the identity. Where the label is
+ * translated, pass { key, label }: the key is what `active` and `onChange`
+ * speak in, so switching language cannot reset which tab is open.
+ *
+ * See "A string that carries identity needs its own handle" in AGENTS.md —
+ * the same reason `<option>` elements here carry explicit values and Postgres
+ * triggers put a PROC_* key in DETAIL rather than relying on MESSAGE.
+ */
 export function Tabs({ tabs, active, onChange }: {
-  tabs: string[]; active: string; onChange: (t: string) => void
+  tabs: (string | { key: string; label: string })[]
+  active: string
+  onChange: (t: string) => void
 }) {
+  const norm = tabs.map(t => (typeof t === 'string' ? { key: t, label: t } : t))
   return (
     <div className="flex gap-1 bg-gray-50 border border-gray-200 p-1 rounded-xl w-fit mb-4">
-      {tabs.map(t => (
-        <button key={t} onClick={() => onChange(t)}
+      {norm.map(t => (
+        <button key={t.key} onClick={() => onChange(t.key)}
           className={cn('px-3 py-1.5 rounded-lg text-xs font-medium transition-all',
-            active === t ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700')}>
-          {t}
+            active === t.key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700')}>
+          {t.label}
         </button>
       ))}
     </div>
@@ -169,13 +193,19 @@ export function Tabs({ tabs, active, onChange }: {
 }
 
 // ── Modal ─────────────────────────────────────────────
-export function Modal({ open, onClose, title, children, footer }: {
-  open: boolean; onClose: () => void; title: string; children: ReactNode; footer?: ReactNode
+export function Modal({ open, onClose, title, children, footer, size = 'md' }: {
+  open: boolean; onClose: () => void; title: string; children: ReactNode
+  footer?: ReactNode
+  /** 'lg' gives editable line-item grids room; defaults to the original width. */
+  size?: 'md' | 'lg'
 }) {
   if (!open) return null
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-start justify-center pt-16 px-4" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="bg-white rounded-2xl border border-gray-200 p-5 w-full max-w-md max-h-[80vh] overflow-y-auto shadow-xl">
+      <div className={cn(
+        'bg-white rounded-2xl border border-gray-200 p-5 w-full max-h-[80vh] overflow-y-auto shadow-xl',
+        size === 'lg' ? 'max-w-2xl' : 'max-w-md'
+      )}>
         <div className="text-base font-bold text-gray-900 mb-4">{title}</div>
         {children}
         {footer && <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-gray-100">{footer}</div>}
@@ -213,6 +243,8 @@ export function TR({ children, className }: { children: ReactNode; className?: s
   return <tr className={cn('hover:bg-gray-50 border-b border-gray-50 last:border-0', className)}>{children}</tr>
 }
 
-export function TD({ children, className }: { children: ReactNode; className?: string }) {
-  return <td className={cn('px-4 py-3 text-gray-700', className)}>{children}</td>
+export function TD({ children, className, colSpan }: {
+  children: ReactNode; className?: string; colSpan?: number
+}) {
+  return <td colSpan={colSpan} className={cn('px-4 py-3 text-gray-700', className)}>{children}</td>
 }

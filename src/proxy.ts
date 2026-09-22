@@ -2,7 +2,7 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
 
   const supabase = createServerClient(
@@ -26,9 +26,15 @@ export async function middleware(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser()
 
-  const isLoginPage = request.nextUrl.pathname === '/login'
-  const isAuthCallback = request.nextUrl.pathname.startsWith('/auth/')
-  const isPublic = isLoginPage || isAuthCallback
+  const path = request.nextUrl.pathname
+  // Every route a person must reach BEFORE they have an account. /register was
+  // missing, so signup redirected to /login and a new customer could not start
+  // at all. /reset-password is reached from an email link by someone who by
+  // definition cannot sign in.
+  const isSignedOutRoute =
+    path === '/login' || path === '/register' || path === '/reset-password'
+  const isAuthCallback = path.startsWith('/auth/')
+  const isPublic = isSignedOutRoute || isAuthCallback
 
   // Not logged in and trying to access protected route → redirect to login
   if (!user && !isPublic) {
@@ -37,8 +43,10 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
-  // Already logged in and trying to access login → redirect to dashboard
-  if (user && isLoginPage) {
+  // Already signed in: login and register have nothing to offer. Reset-password
+  // is deliberately not included — a signed-in user may still be completing a
+  // recovery link, and bouncing them would strand it.
+  if (user && (path === '/login' || path === '/register')) {
     const url = request.nextUrl.clone()
     url.pathname = '/dashboard'
     return NextResponse.redirect(url)

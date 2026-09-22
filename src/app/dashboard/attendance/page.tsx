@@ -1,43 +1,58 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState } from 'react'
 import { useApp } from '@/hooks/useApp'
+import { useLang } from '@/context/LangContext'
+import { withTimeout } from '@/lib/withTimeout'
 import { createClient } from '../../../../lib/supabase'
-import { Button, Table, TR, TD, Card } from '@/components/ui'
+import { Button, Table, TR, TD, Card, Alert } from '@/components/ui'
 import type { Participant, AttendanceSession } from '@/types'
 
 export default function AttendancePage() {
   const { activeProject, isAdmin } = useApp()
+  const { t } = useLang()
   const supabase = createClient()
   const [participants, setParticipants] = useState<Participant[]>([])
+  // Minimal error slot: these screens had no way to report a failed or
+  // stalled write, so a hang left the button spinning with no explanation.
+  const [opError, setOpError] = useState<string | null>(null)
   const [sessions, setSessions] = useState<AttendanceSession[]>([])
   const [attState, setAttState] = useState<Record<string,'p'|'a'|''>>({})
   const [sessDate, setSessDate] = useState(new Date().toISOString().slice(0,10))
   const [saving, setSaving] = useState(false)
 
-  const load = useCallback(async () => {
-    if (!activeProject) return
-    const [partR, sessR] = await Promise.all([
-      supabase.from('participants').select('*').eq('project_id', activeProject.id).eq('status', 'Active').order('first_name'),
-      supabase.from('attendance_sessions').select('*').eq('project_id', activeProject.id).order('session_date', { ascending: false })
-    ])
-    setParticipants((partR.data ?? []) as Participant[])
-    // compute present/absent counts per session
-    const rawSessions = (sessR.data ?? []) as AttendanceSession[]
-    const sessIds = rawSessions.map(s => s.id)
-    if (sessIds.length > 0) {
-      const { data: records } = await supabase.from('attendance_records').select('session_id,status').in('session_id', sessIds)
-      const enriched = rawSessions.map(s => {
-        const recs = (records ?? []).filter(r => r.session_id === s.id)
-        const present = recs.filter(r => r.status === 'present').length
-        const absent = recs.filter(r => r.status === 'absent').length
-        const total = present + absent
-        return { ...s, present_count: present, absent_count: absent, rate: total > 0 ? Math.round((present/total)*100) : 0 }
-      })
-      setSessions(enriched)
-    } else setSessions([])
-  }, [activeProject]) // eslint-disable-line
+  // Bumped by mutations to re-run the fetch below. The effect owns the query so
+  // a project switch mid-flight cannot land stale rows.
+  const [reloadKey, setReloadKey] = useState(0)
+  const load = () => setReloadKey(k => k + 1)
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    if (!activeProject) return
+    let cancelled = false
+    ;(async () => {
+      const [partR, sessR] = await Promise.all([
+        supabase.from('participants').select('*').eq('project_id', activeProject.id).eq('status', 'Active').order('first_name'),
+        supabase.from('attendance_sessions').select('*').eq('project_id', activeProject.id).order('session_date', { ascending: false })
+      ])
+      if (cancelled) return
+      setParticipants((partR.data ?? []) as Participant[])
+      // compute present/absent counts per session
+      const rawSessions = (sessR.data ?? []) as AttendanceSession[]
+      const sessIds = rawSessions.map(s => s.id)
+      if (sessIds.length > 0) {
+        const { data: records } = await supabase.from('attendance_records').select('session_id,status').in('session_id', sessIds)
+        if (cancelled) return
+        const enriched = rawSessions.map(s => {
+          const recs = (records ?? []).filter(r => r.session_id === s.id)
+          const present = recs.filter(r => r.status === 'present').length
+          const absent = recs.filter(r => r.status === 'absent').length
+          const total = present + absent
+          return { ...s, present_count: present, absent_count: absent, rate: total > 0 ? Math.round((present/total)*100) : 0 }
+        })
+        setSessions(enriched)
+      } else setSessions([])
+    })()
+    return () => { cancelled = true }
+  }, [activeProject, reloadKey]) // eslint-disable-line
 
   const toggle = (id: string) => {
     if (!isAdmin) return
@@ -49,11 +64,17 @@ export default function AttendancePage() {
   const saveSession = async () => {
     if (!activeProject) return
     const marked = participants.filter(p => attState[p.id] && attState[p.id] !== '')
-    if (marked.length === 0) return alert('Mark at least one participant.')
-    setSaving(true)
-    const { data: sess } = await supabase.from('attendance_sessions').insert({
+    // An alert() blocks the page and says nothing the error slot cannot.
+    if (marked.length === 0) return setOpError(t.markAtLeastOne)
+    setSaving(true); setOpError(null)
+    const raced = await withTimeout(Promise.resolve(supabase.from('attendance_sessions').insert({
       project_id: activeProject.id, session_date: sessDate
-    }).select().single()
+    }).select().single()))
+    if (raced.timedOut) {
+      setSaving(false)
+      return setOpError(t.procErrors.timeout)
+    }
+    const { data: sess } = raced.value
     if (sess) {
       const records = participants.map(p => ({
         session_id: sess.id, participant_id: p.id,
@@ -64,7 +85,7 @@ export default function AttendancePage() {
     setAttState({}); setSaving(false); load()
   }
 
-  if (!activeProject) return <div className="text-gray-400 text-sm p-4">Select a project first.</div>
+  if (!activeProject) return <div className="text-gray-400 text-sm p-4">{t.selectProjectFirst}</div>
 
   const avgRate = sessions.length > 0
     ? Math.round(sessions.reduce((a, s) => a + (s.rate ?? 0), 0) / sessions.length)
@@ -72,25 +93,27 @@ export default function AttendancePage() {
 
   return (
     <div>
-      <div className="text-xs text-gray-400 mb-1">Projects › {activeProject.name} › Attendance</div>
+      <div className="text-xs text-gray-400 mb-1">{t.projects} › {activeProject.name} › {t.attendance}</div>
       <div className="flex items-end justify-between mb-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Attendance</h1>
-          <div className="text-xs text-gray-400">{sessions.length} sessions · avg rate {avgRate !== null ? `${avgRate}%` : '—'}</div>
+          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">{t.attendance}</h1>
+          <div className="text-xs text-gray-400">{sessions.length} {t.sessions} · {t.avgRate} {avgRate !== null ? `${avgRate}%` : '—'}</div>
         </div>
         {isAdmin && (
           <div className="flex items-center gap-2">
             <input type="date" value={sessDate} onChange={e=>setSessDate(e.target.value)}
               className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-700 focus:outline-none focus:border-indigo-400"/>
-            <Button variant="primary" size="sm" onClick={saveSession} disabled={saving}>{saving?'Saving…':'Save session'}</Button>
+            <Button variant="primary" size="sm" onClick={saveSession} disabled={saving}>{saving ? t.saving : t.saveSession}</Button>
           </div>
         )}
       </div>
 
+      {opError && <div className="mb-3"><Alert>{opError}</Alert></div>}
+
       <Card className="mb-4">
-        <div className="text-sm font-semibold text-gray-900 mb-3">Mark attendance — tap each participant</div>
+        <div className="text-sm font-semibold text-gray-900 mb-3">{t.markAttendance}</div>
         {participants.length === 0
-          ? <div className="text-sm text-gray-400">Add active participants first.</div>
+          ? <div className="text-sm text-gray-400">{t.addActiveParticipantsFirst}</div>
           : <div className="flex flex-wrap gap-2">
               {participants.map(p => {
                 const st = attState[p.id] ?? ''
@@ -104,13 +127,13 @@ export default function AttendancePage() {
             </div>
         }
         <div className="flex gap-4 mt-3 text-xs text-gray-400">
-          <span><span className="inline-block w-2 h-2 rounded-full bg-emerald-400 mr-1.5"/>Present</span>
-          <span><span className="inline-block w-2 h-2 rounded-full bg-red-400 mr-1.5"/>Absent</span>
-          <span><span className="inline-block w-2 h-2 rounded-full bg-gray-200 mr-1.5"/>Not marked</span>
+          <span><span className="inline-block w-2 h-2 rounded-full bg-emerald-400 mr-1.5"/>{t.present}</span>
+          <span><span className="inline-block w-2 h-2 rounded-full bg-red-400 mr-1.5"/>{t.absent}</span>
+          <span><span className="inline-block w-2 h-2 rounded-full bg-gray-200 mr-1.5"/>{t.notMarked}</span>
         </div>
       </Card>
 
-      <Table headers={['Date','Present','Absent','Attendance rate']} empty={sessions.length === 0}>
+      <Table headers={[t.date, t.present, t.absent, t.attendanceRate]} empty={sessions.length === 0}>
         {sessions.map(s => (
           <TR key={s.id}>
             <TD className="font-medium">{s.session_date}</TD>

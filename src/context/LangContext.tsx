@@ -1,6 +1,8 @@
 'use client'
 
 import { createContext, useContext, useState, ReactNode } from 'react'
+import type { ProcErrorStrings } from '@/lib/pgError'
+import type { AuthErrorStrings } from '@/lib/authError'
 
 type Lang = 'en' | 'fr'
 
@@ -41,6 +43,13 @@ const T = {
     projectName: 'Project name', projectType: 'Project type',
     description: 'Description', startDate: 'Start date', endDate: 'End date',
     budget: 'Total budget (USD)', participantTarget: 'Participant target',
+    noProjects: 'No projects yet', noProjectsSub: 'Create your first project to get started',
+    createNewProject: 'Create new project', creating: 'Creating…', budgetLabel: 'Budget',
+    projectTypes: {
+      education_training: 'Education & training', humanitarian_relief: 'Humanitarian relief',
+      health: 'Health', church_ministry: 'Church ministry',
+      community_development: 'Community development', other: 'Other',
+    } as Record<string, string>,
     budgetCategories: 'Budget categories', projectColour: 'Project colour',
     // Participants
     addParticipant: 'Add participant', firstName: 'First name', lastName: 'Last name',
@@ -60,8 +69,24 @@ const T = {
     leave: 'Leave', signInSheet: 'Staff sign-in sheet', saveSignIn: 'Save sign-in',
     logPayment: 'Log payment', leaveRequest: 'Leave request',
     present: 'Present', absent: 'Absent', notMarked: 'Not marked',
+    hrStaff: 'HR & Staff', assignedToProject: 'assigned to this project', totalInOrg: 'total in AFRILEAD',
+    addStaffFirst: 'Add staff first.', sessionType: 'Session type', rate: 'Rate',
+    addStaffMember: 'Add staff member', logPayrollDisbursement: 'Log payroll disbursement',
+    submitLeaveRequest: 'Submit leave request', requestLeave: 'Request leave', submit: 'Submit',
+    staffMember: 'Staff member', datePaid: 'Date paid', amountPaid: 'Amount (USD)',
+    from: 'From', to: 'To', selectPlaceholder: '— Select —', salaryMo: 'Salary/mo',
+    contractEndShort: 'Contract end', pd: 'PD', role: 'Role',
+    staffTypes: { 'full-time': 'Full-time', 'part-time': 'Part-time', volunteer: 'Volunteer', contractor: 'Contractor' } as Record<string, string>,
+    sessionTypes: { Training: 'Training', 'Team meeting': 'Team meeting', 'Field work': 'Field work', Workshop: 'Workshop' } as Record<string, string>,
+    leaveTypes: { 'Annual leave': 'Annual leave', 'Sick leave': 'Sick leave', 'Maternity/Paternity': 'Maternity / Paternity', Unpaid: 'Unpaid' } as Record<string, string>,
+    leaveStatuses: { pending: 'Pending', approved: 'Approved' } as Record<string, string>,
+    hrTabs: { Roster: 'Roster', 'Staff attendance': 'Staff attendance', Payroll: 'Payroll', Leave: 'Leave' } as Record<string, string>,
     // Attendance
     markAttendance: 'Mark attendance — tap each participant',
+    addActiveParticipantsFirst: 'Add active participants first.',
+    markAtLeastOne: 'Mark at least one participant before saving.',
+    markAtLeastOneStaff: 'Mark at least one staff member before saving.',
+    avgRate: 'avg rate',
     saveSession: 'Save session', sessionLog: 'Session log', sessionDate: 'Session date',
     // Reports
     addReport: 'Add report', markSubmitted: 'Mark submitted',
@@ -69,15 +94,196 @@ const T = {
     overdue: 'overdue',
     // Schedule
     addPhase: 'Add phase', phaseName: 'Phase name', period: 'Period',
+    scheduleAndMilestones: 'Schedule & Milestones', phases: 'phases',
+    milestonesDone: 'milestones done', complete_: 'complete',
+    noPhases: 'No phases added', noPhasesSub: 'Add curriculum modules or program phases',
+    noMilestones: 'No milestones yet.', milestoneName: 'Milestone name…',
+    addSchedulePhase: 'Add schedule phase', tag: 'Tag',
+    phaseTags: {
+      english: 'English', culture: 'Culture', skills: 'Skills', steam: 'STEAM',
+      intensive: 'Intensive', assessment: 'Assessment', relief: 'Relief',
+      distribution: 'Distribution', admin: 'Admin', other: 'Other',
+    } as Record<string, string>,
+    milestoneStatuses: { done: 'Done', upcoming: 'Upcoming', overdue: 'Overdue' } as Record<string, string>,
     activities: 'Activities (one per line)', milestones: 'Milestones',
     // Supply
     addStock: 'Add stock', logDistribution: 'Log distribution',
     itemName: 'Item name', qtyReceived: 'Quantity received', unit: 'Unit',
     donorSource: 'Donor / Source', inventory: 'Inventory', distributions: 'Distributions',
     stockLevels: 'Stock levels', balance: 'Balance',
+    supplyDistribution: 'Supply & Distribution', itemTypes: 'item types',
+    unitsDistributed: 'units distributed', beneficiaries: 'beneficiaries',
+    addStockReceipt: 'Add stock receipt', logDistributionEvent: 'Log distribution event',
+    dateReceived: 'Date received', qtyOut: 'Qty out', quantityOut: 'Quantity out',
+    beneficiariesServed: 'Beneficiaries served', location: 'Location', item: 'Item',
+    optional: 'Optional',
+    insufficientStock: 'Not enough stock. Balance: {balance} {unit}',
     // KPIs
     addKPI: 'Add KPI', targetValue: 'Target value', currentValue: 'Current value',
     noKPIs: 'No KPIs yet', addFirstKPI: 'Add first KPI',
+    // Procurement
+    procurement: 'Procurement', vendors: 'Vendors', vendorRegister: 'Vendor register',
+    addVendor: 'Add vendor', editVendor: 'Edit vendor', newVendor: 'New vendor',
+    vendorName: 'Vendor name', vendorType: 'Vendor type', contactPerson: 'Contact person',
+    phone: 'Phone', address: 'Address', registrationNo: 'Registration no.',
+    taxId: 'Tax ID', bankDetails: 'Bank details',
+    all: 'All', edit: 'Edit', approve: 'Approve', approved: 'Approved',
+    pendingApproval: 'Pending', blacklist: 'Blacklist', blacklisted: 'Blacklisted',
+    unblacklist: 'Remove from blacklist', blacklistVendor: 'Blacklist vendor',
+    blacklistReason: 'Reason for blacklisting',
+    blacklistReasonHint: 'Required. Stored on the vendor record and shown wherever this vendor appears.',
+    noVendors: 'No vendors yet',
+    noVendorsSub: 'Add a supplier to start raising purchase requests against it.',
+    vendorReadOnly: 'You have read-only access to the vendor register.',
+    // Purchase requests
+    requests: 'Purchase requests', newRequest: 'New request', editRequest: 'Edit request',
+    selectProjectFirst: 'Select a project first.',
+    profileUnavailable: 'Profile unavailable',
+    secured: 'secured', hiddenFigure: 'Hidden',
+    profileErrorTitle: 'We could not load your profile',
+    profileErrorBody: 'You are signed in, but your account details did not load, so permissions cannot be applied safely. Nothing has been changed.',
+    retry: 'Try again',
+    // Onboarding
+    noOrgTitle: 'Set up your organisation',
+    noOrgBody: 'Your account is not attached to an organisation yet. Create one to get started — you will be its owner.',
+    noOrgInviteNote: 'Expecting to join a colleague’s organisation? Ask them to invite you instead — joining is by invitation only.',
+    organisationName: 'Organisation name',
+    createOrganisation: 'Create organisation', creatingOrganisation: 'Creating…',
+    requestNo: 'Request no.', requestTitle: 'Title', justification: 'Justification',
+    neededBy: 'Needed by', budgetLine: 'Budget line', estimatedTotal: 'Estimated total',
+    lineItems: 'Line items', addLine: 'Add line',
+    qty: 'Qty', unitCost: 'Unit cost (USD)', lineTotal: 'Line total',
+    items: 'items', noRequests: 'No purchase requests yet',
+    noRequestsSub: 'Raise a request to start the procurement process.',
+    requestReadOnly: 'You have read-only access to purchase requests.',
+    requestDraftHint: 'Saved as a draft. Submitting for approval comes next.',
+    needAtLeastOneLine: 'Add at least one line item with a description.',
+    itemsFailed: 'The request was saved as a draft, but its line items were not: ',
+    itemised: 'Itemised', lumpSum: 'Lump sum', statedTotal: 'Stated total (USD)',
+    lumpSumHint: 'A lump-sum request states its own total. Add line items instead and the database totals them for you.',
+    totalFromLines: 'Totalled by the database from the line items.',
+    approvals: 'Approvals', approvalQueue: 'Approval queue',
+    yourOwnRequest: 'You raised this — someone else must approve it',
+    purchaseOrder: 'Purchase order', issuePO: 'Issue purchase order', issuingPO: 'Issuing…',
+    deliveries: 'Deliveries', recordDelivery: 'Record delivery', recordingDelivery: 'Recording…',
+    grnNumber: 'GRN', receivedDate: 'Received on', deliveryComplete: 'Delivery complete',
+    conditionNotes: 'Condition notes', discrepancyNotes: 'What was missing or damaged',
+    discrepancyHint: 'Required when the delivery is not complete. Stays on the order until resolved.',
+    qtyOrdered: 'Ordered', grnQtyReceived: 'Received',
+    noDeliveries: 'No deliveries recorded', noDeliveriesSub: 'Record a delivery when goods arrive.',
+    outstandingDiscrepancies: 'This order stays {status} until these shortfalls are resolved.',
+    resolve: 'Resolve', resolveDiscrepancy: 'Resolve discrepancy', resolving: 'Resolving…',
+    resolutionNotes: 'How the shortfall was resolved',
+    resolutionNotesHint: 'Required. Kept on the delivery beside the original shortfall — resolving does not erase it.',
+    resolvedDiscrepancy: 'Shortfall resolved', resolvedBy: 'Resolved by', resolvedOn: 'Resolved on',
+    reopenDiscrepancy: 'Reopen', reopening: 'Reopening…',
+    originalShortfall: 'Original shortfall',
+    deliveriesReadOnly: 'You have read-only access to deliveries.',
+    poNotOpenHint: 'Deliveries can only be recorded against an open order.',
+    complete: 'Complete', incomplete: 'Incomplete',
+    poNumber: 'PO number', issueDate: 'Issue date', expectedDelivery: 'Expected delivery',
+    deliveryTerms: 'Delivery terms', paymentTerms: 'Payment terms', poTotal: 'Order total (USD)',
+    poIssued: 'Purchase order issued', poReadiness: 'Before a purchase order can be issued:',
+    needApproved: 'the request must be approved', needQuotes: 'at least {required} quotes recorded',
+    needWinner: 'a winning quote selected', poVendorLocked: 'Vendor is taken from the selected quote and cannot be changed.',
+    // Procurement settings
+    procurementRules: 'Rules & thresholds', procurementSettings: 'Procurement settings',
+    procurementSettingsSub: 'Thresholds the database enforces on every request and order in this organisation.',
+    financeApprovalThreshold: 'Finance approval threshold (USD)',
+    financeApprovalThresholdHint: 'At or above this amount, only an owner or finance officer can approve a request. Below it, a coordinator can.',
+    quotesRequiredThreshold: 'Competitive quotes threshold (USD)',
+    quotesRequiredThresholdHint: 'At or above this amount, a purchase order is refused until the minimum number of quotes has been recorded.',
+    minQuotesRequired: 'Minimum quotes required',
+    minQuotesRequiredHint: 'At least 1. Applies only to requests at or above the quotes threshold.',
+    settingsReadOnly: 'Only an owner or finance officer can change these thresholds.',
+    settingsSaved: 'Thresholds saved. They apply to every request and order from now on.',
+    settingsMissing: 'No procurement settings exist for this organisation yet.',
+    settingsMissingSub: 'An owner or finance officer needs to create them before thresholds can be enforced.',
+    settingsAppliesNow: 'Changing a threshold does not re-open requests already approved under the old one.',
+    lastUpdated: 'Last updated',
+    thresholdHistory: 'Threshold changes', noThresholdHistory: 'No threshold changes recorded yet.',
+    changedFromTo: '{field}: {from} → {to}', thresholdHistoryHint: 'The ten most recent changes.',
+    statusIssued: 'Issued', statusPartiallyReceived: 'Partially received',
+    statusReceived: 'Received', statusCancelled2: 'Cancelled', statusClosed: 'Closed',
+    quotes: 'Quotes', addQuote: 'Add quote', newQuote: 'New quote',
+    vendor: 'Vendor', quoteRef: 'Quote reference', quoteDate: 'Quote date',
+    quoteTotal: 'Quote total (USD)', validUntil: 'Valid until', attachmentRef: 'Attachment reference',
+    selectWinner: 'Select as winner', selected: 'Selected', lowest: 'Lowest',
+    selectionJustification: 'Why this vendor?',
+    selectionJustificationHint: 'Required. Recorded in the audit trail alongside the totals compared.',
+    quotesProgress: '{actual} of {required} quotes',
+    winnerChosen: 'Winner selected', noWinnerYet: 'No winner selected yet',
+    quotesNotRequired: 'Below the {threshold} threshold — competitive quotes are not required.',
+    noQuotes: 'No quotes recorded', noQuotesSub: 'Add quotes from vendors to compare them here.',
+    quotesReadOnly: 'You have read-only access to quotes.',
+    backToRequests: 'Back to requests', requestDetail: 'Request detail',
+    noApprovedVendors: 'No vendors available. Blacklisted vendors cannot be quoted.',
+    selecting: 'Selecting…',
+    reject: 'Reject', rejectRequest: 'Reject request', rejectionReason: 'Reason for rejection',
+    rejectionReasonHint: 'Required. Stored on the request and shown to whoever raised it.',
+    noPendingApprovals: 'Nothing awaiting approval',
+    noPendingApprovalsSub: 'Requests appear here once they are submitted for approval.',
+    approvalReadOnly: 'You have read-only access to the approval queue.',
+    raisedBy: 'Raised by', approving: 'Approving…', rejecting: 'Rejecting…',
+    financeThresholdNote: 'Requests of {threshold} or more need finance or owner approval.',
+    statusDraft: 'Draft', statusSubmitted: 'Submitted', statusApproved: 'Approved',
+    statusRejected: 'Rejected', statusCancelled: 'Cancelled', statusOrdered: 'Ordered',
+    statusCompleted: 'Completed',
+    authErrors: {
+      invalid_credentials: 'That email or password is not correct.',
+      email_not_confirmed: 'Confirm your email address before signing in.',
+      over_request_rate_limit: 'Too many attempts. Wait a moment and try again.',
+      user_already_exists: 'An account already exists for this email. Sign in instead, or use a different address.',
+      weak_password: 'That password is too weak. Use at least 8 characters.',
+      invalid_email: 'That email address is not valid. Check it for typos — some domains, such as .test, are not accepted.',
+      generic: 'Something went wrong. Please try again.',
+    } satisfies AuthErrorStrings,
+    authLinkErrors: {
+      link_expired: "That link has expired. If you've already confirmed your email, sign in with your password; otherwise request a new link.",
+      link_used: 'That confirmation link has already been used. Try signing in with your email and password.',
+      link_invalid: 'That confirmation link could not be read. Check you opened the most recent email, or request a new link.',
+    } as Record<string, string>,
+    // Procurement errors — keys come from the trigger DETAIL / constraint name.
+    // {param} placeholders are filled from the trigger's HINT payload.
+    procErrors: {
+      PROC_VENDOR_BLACKLISTED: 'Cannot issue a purchase order to {vendor} — this vendor is blacklisted ({reason}).',
+      PROC_REQUEST_NOT_APPROVED: 'Request {request_no} must be approved first (current status: {status}).',
+      PROC_INSUFFICIENT_QUOTES: 'Purchases of {threshold} USD or more need at least {required} competitive quotes. Only {actual} recorded on {request_no}.',
+      PROC_NO_QUOTE_SELECTED: 'Select the winning quote on {request_no} and record why, before issuing the purchase order.',
+      PROC_VENDOR_MISMATCH: 'This purchase order names a different vendor than the quote selected on {request_no}.',
+      PROC_APPROVAL_ROLE_REQUIRED: 'Requests of {threshold} USD or more need finance or owner approval (this one is {amount}).',
+      PROC_SELF_APPROVAL: 'You raised {request_no} and cannot approve it yourself. Someone else must approve it.',
+      PROC_REQUESTER_IMMUTABLE: 'The requester on {request_no} cannot be changed.',
+      PROC_PO_NOT_OPEN: 'Nothing further can be recorded against {po_number} — the order is {status}.',
+      PROC_STATUS_UPDATE_FAILED: 'Delivery recorded but the order status could not be updated.',
+      PROC_SELF_ROLE_CHANGE: 'You cannot change your own role or organisation. Ask an owner of your organisation.',
+      PROC_ROLE_CHANGE_DENIED: 'Only an owner of this organisation can change a member’s role.',
+      PROC_ORG_IMMUTABLE: 'A member cannot be moved to another organisation.',
+      PROC_ORG_NAME_REQUIRED: 'Enter a name for your organisation.',
+      PROC_ALREADY_IN_ORG: 'You already belong to an organisation.',
+      PROC_NOT_SIGNED_IN: 'You must be signed in to do that.',
+      PROC_ORG_BIND_FAILED: 'The organisation was not set up correctly. Nothing was saved — please try again.',
+      quotes_selected_needs_justification: 'Record why this vendor was selected before choosing this quote.',
+      quotes_one_selected_per_request: 'Another quote is already selected on this request.',
+      vendors_blacklist_needs_reason: 'Give a reason before blacklisting this vendor.',
+      vendors_org_id_name_key: 'A vendor with this name already exists.',
+      purchase_requests_rejection_needs_reason: 'Give a reason before rejecting this request.',
+      quotes_purchase_request_id_vendor_id_key: 'This vendor has already quoted on this request.',
+      purchase_orders_one_per_request: 'A purchase order has already been issued for this request.',
+      goods_received_discrepancy_needs_notes: 'Describe what was missing or damaged before saving an incomplete delivery.',
+      goods_received_resolution_needs_notes: 'Say how the shortfall was resolved before closing it.',
+      purchase_request_items_qty_check: 'Quantity must be greater than zero.',
+      purchase_request_items_unit_cost_estimate_usd_check: 'Unit cost cannot be negative.',
+      purchase_requests_estimated_total_usd_check: 'The stated total cannot be negative.',
+      quotes_total_usd_check: 'A quote total cannot be negative.',
+      purchase_orders_total_usd_check: 'An order total cannot be negative.',
+      goods_received_items_qty_received_check: 'Quantity received cannot be negative.',
+      procurement_settings_min_quotes_required_check: 'At least one quote must be required.',
+      goods_received_only_incomplete_resolvable: 'Only an incomplete delivery has a discrepancy to resolve.',
+      denied: "You don't have permission to do that.",
+      timeout: 'That took too long to load. Check your connection and try again.',
+      generic: 'Something went wrong. Please try again.',
+    } satisfies ProcErrorStrings,
     // Alerts
     attendanceLow: (rate: number) => `Attendance rate (${rate}%) is below the 80% target — review retention measures.`,
     reportsOverdue: (n: number) => `${n} report${n>1?'s are':' is'} past due — check the Reports tab.`,
@@ -118,6 +324,13 @@ const T = {
     projectName: 'Nom du projet', projectType: 'Type de projet',
     description: 'Description', startDate: 'Date de début', endDate: 'Date de fin',
     budget: 'Budget total (USD)', participantTarget: 'Objectif participants',
+    noProjects: 'Aucun projet', noProjectsSub: 'Créez votre premier projet pour commencer',
+    createNewProject: 'Créer un projet', creating: 'Création…', budgetLabel: 'Budget',
+    projectTypes: {
+      education_training: 'Éducation et formation', humanitarian_relief: 'Aide humanitaire',
+      health: 'Santé', church_ministry: 'Ministère religieux',
+      community_development: 'Développement communautaire', other: 'Autre',
+    } as Record<string, string>,
     budgetCategories: 'Catégories budgétaires', projectColour: 'Couleur du projet',
     // Participants
     addParticipant: 'Ajouter un participant', firstName: 'Prénom', lastName: 'Nom',
@@ -137,8 +350,24 @@ const T = {
     leave: 'Congés', signInSheet: 'Feuille de présence', saveSignIn: 'Enregistrer la présence',
     logPayment: 'Enregistrer le paiement', leaveRequest: 'Demande de congé',
     present: 'Présent', absent: 'Absent', notMarked: 'Non marqué',
+    hrStaff: 'RH et personnel', assignedToProject: 'affectés à ce projet', totalInOrg: 'au total dans AFRILEAD',
+    addStaffFirst: "Ajoutez d'abord du personnel.", sessionType: 'Type de séance', rate: 'Taux',
+    addStaffMember: 'Ajouter un membre du personnel', logPayrollDisbursement: 'Enregistrer un versement de salaire',
+    submitLeaveRequest: 'Soumettre une demande de congé', requestLeave: 'Demander un congé', submit: 'Soumettre',
+    staffMember: 'Membre du personnel', datePaid: 'Date de paiement', amountPaid: 'Montant (USD)',
+    from: 'Du', to: 'Au', selectPlaceholder: '— Sélectionner —', salaryMo: 'Salaire / mois',
+    contractEndShort: 'Fin de contrat', pd: 'DP', role: 'Fonction',
+    staffTypes: { 'full-time': 'Temps plein', 'part-time': 'Temps partiel', volunteer: 'Bénévole', contractor: 'Prestataire' } as Record<string, string>,
+    sessionTypes: { Training: 'Formation', 'Team meeting': "Réunion d'équipe", 'Field work': 'Travail de terrain', Workshop: 'Atelier' } as Record<string, string>,
+    leaveTypes: { 'Annual leave': 'Congé annuel', 'Sick leave': 'Congé maladie', 'Maternity/Paternity': 'Maternité / Paternité', Unpaid: 'Sans solde' } as Record<string, string>,
+    leaveStatuses: { pending: 'En attente', approved: 'Approuvé' } as Record<string, string>,
+    hrTabs: { Roster: 'Effectif', 'Staff attendance': 'Présence du personnel', Payroll: 'Paie', Leave: 'Congés' } as Record<string, string>,
     // Attendance
     markAttendance: 'Marquer la présence — appuyez sur chaque participant',
+    addActiveParticipantsFirst: "Ajoutez d'abord des participants actifs.",
+    markAtLeastOne: "Marquez au moins un participant avant d'enregistrer.",
+    markAtLeastOneStaff: "Marquez au moins un membre du personnel avant d'enregistrer.",
+    avgRate: 'taux moyen',
     saveSession: 'Enregistrer la séance', sessionLog: 'Journal des séances', sessionDate: 'Date de séance',
     // Reports
     addReport: 'Ajouter un rapport', markSubmitted: 'Marquer comme soumis',
@@ -146,20 +375,218 @@ const T = {
     overdue: 'en retard',
     // Schedule
     addPhase: 'Ajouter une phase', phaseName: 'Nom de la phase', period: 'Période',
+    scheduleAndMilestones: 'Calendrier et jalons', phases: 'phases',
+    milestonesDone: 'jalons atteints', complete_: 'terminés',
+    noPhases: 'Aucune phase ajoutée', noPhasesSub: 'Ajoutez des modules de programme ou des phases',
+    noMilestones: 'Aucun jalon pour le moment.', milestoneName: 'Nom du jalon…',
+    addSchedulePhase: 'Ajouter une phase', tag: 'Étiquette',
+    phaseTags: {
+      english: 'Anglais', culture: 'Culture', skills: 'Compétences', steam: 'STEAM',
+      intensive: 'Intensif', assessment: 'Évaluation', relief: 'Aide humanitaire',
+      distribution: 'Distribution', admin: 'Administration', other: 'Autre',
+    } as Record<string, string>,
+    milestoneStatuses: { done: 'Atteint', upcoming: 'À venir', overdue: 'En retard' } as Record<string, string>,
     activities: 'Activités (une par ligne)', milestones: 'Jalons',
     // Supply
     addStock: 'Ajouter du stock', logDistribution: 'Enregistrer une distribution',
     itemName: 'Nom de l\'article', qtyReceived: 'Quantité reçue', unit: 'Unité',
     donorSource: 'Bailleur / Source', inventory: 'Inventaire', distributions: 'Distributions',
     stockLevels: 'Niveaux de stock', balance: 'Solde',
+    supplyDistribution: 'Approvisionnement et distribution', itemTypes: "types d'articles",
+    unitsDistributed: 'unités distribuées', beneficiaries: 'bénéficiaires',
+    addStockReceipt: "Enregistrer une réception de stock", logDistributionEvent: 'Enregistrer une distribution',
+    dateReceived: 'Date de réception', qtyOut: 'Qté sortie', quantityOut: 'Quantité sortie',
+    beneficiariesServed: 'Bénéficiaires servis', location: 'Lieu', item: 'Article',
+    optional: 'Facultatif',
+    insufficientStock: 'Stock insuffisant. Solde : {balance} {unit}',
     // KPIs
     addKPI: 'Ajouter un KPI', targetValue: 'Valeur cible', currentValue: 'Valeur actuelle',
     noKPIs: 'Aucun KPI', addFirstKPI: 'Ajouter le premier KPI',
+    // Procurement
+    procurement: 'Approvisionnement', vendors: 'Fournisseurs', vendorRegister: 'Registre des fournisseurs',
+    addVendor: 'Ajouter un fournisseur', editVendor: 'Modifier le fournisseur', newVendor: 'Nouveau fournisseur',
+    vendorName: 'Nom du fournisseur', vendorType: 'Type de fournisseur', contactPerson: 'Personne à contacter',
+    phone: 'Téléphone', address: 'Adresse', registrationNo: 'N° d\'enregistrement',
+    taxId: 'Identifiant fiscal', bankDetails: 'Coordonnées bancaires',
+    all: 'Tous', edit: 'Modifier', approve: 'Approuver', approved: 'Approuvé',
+    pendingApproval: 'En attente', blacklist: 'Mettre sur liste noire', blacklisted: 'Liste noire',
+    unblacklist: 'Retirer de la liste noire', blacklistVendor: 'Mettre le fournisseur sur liste noire',
+    blacklistReason: 'Motif de la mise sur liste noire',
+    blacklistReasonHint: 'Obligatoire. Conservé dans la fiche du fournisseur et affiché partout où il apparaît.',
+    noVendors: 'Aucun fournisseur',
+    noVendorsSub: 'Ajoutez un fournisseur pour pouvoir créer des demandes d\'achat.',
+    vendorReadOnly: 'Vous avez un accès en lecture seule au registre des fournisseurs.',
+    // Demandes d'achat
+    requests: "Demandes d'achat", newRequest: 'Nouvelle demande', editRequest: 'Modifier la demande',
+    selectProjectFirst: 'Sélectionnez d\'abord un projet.',
+    profileUnavailable: 'Profil indisponible',
+    secured: 'sécurisé', hiddenFigure: 'Masqué',
+    profileErrorTitle: 'Impossible de charger votre profil',
+    profileErrorBody: "Vous êtes connecté, mais les détails de votre compte n'ont pas été chargés ; les autorisations ne peuvent donc pas être appliquées en toute sécurité. Rien n'a été modifié.",
+    retry: 'Réessayer',
+    // Intégration
+    noOrgTitle: 'Configurez votre organisation',
+    noOrgBody: "Votre compte n'est encore rattaché à aucune organisation. Créez-en une pour commencer — vous en serez le propriétaire.",
+    noOrgInviteNote: "Vous pensiez rejoindre l'organisation d'un collègue ? Demandez-lui de vous inviter — l'adhésion se fait uniquement sur invitation.",
+    organisationName: "Nom de l'organisation",
+    createOrganisation: "Créer l'organisation", creatingOrganisation: 'Création…',
+    requestNo: 'N° de demande', requestTitle: 'Intitulé', justification: 'Justification',
+    neededBy: 'Requis pour le', budgetLine: 'Ligne budgétaire', estimatedTotal: 'Total estimé',
+    lineItems: 'Lignes', addLine: 'Ajouter une ligne',
+    qty: 'Qté', unitCost: 'Coût unitaire (USD)', lineTotal: 'Total ligne',
+    items: 'lignes', noRequests: "Aucune demande d'achat",
+    noRequestsSub: "Créez une demande pour lancer le processus d'achat.",
+    requestReadOnly: "Vous avez un accès en lecture seule aux demandes d'achat.",
+    requestDraftHint: "Enregistrée comme brouillon. La soumission pour approbation viendra ensuite.",
+    needAtLeastOneLine: 'Ajoutez au moins une ligne avec une description.',
+    itemsFailed: "La demande a été enregistrée comme brouillon, mais pas ses lignes : ",
+    itemised: 'Détaillée', lumpSum: 'Forfait', statedTotal: 'Total déclaré (USD)',
+    lumpSumHint: "Une demande forfaitaire déclare son propre total. Ajoutez plutôt des lignes et la base de données en calcule le total.",
+    totalFromLines: 'Total calculé par la base de données à partir des lignes.',
+    approvals: 'Approbations', approvalQueue: "File d'approbation",
+    yourOwnRequest: "Vous avez créé cette demande — une autre personne doit l'approuver",
+    purchaseOrder: 'Bon de commande', issuePO: 'Émettre le bon de commande', issuingPO: 'Émission…',
+    deliveries: 'Livraisons', recordDelivery: 'Enregistrer une livraison', recordingDelivery: 'Enregistrement…',
+    grnNumber: 'BR', receivedDate: 'Reçu le', deliveryComplete: 'Livraison complète',
+    conditionNotes: 'Notes sur l\'état', discrepancyNotes: 'Ce qui manquait ou était endommagé',
+    discrepancyHint: "Obligatoire si la livraison est incomplète. Reste sur la commande jusqu'à résolution.",
+    qtyOrdered: 'Commandé', grnQtyReceived: 'Reçu',
+    noDeliveries: 'Aucune livraison enregistrée', noDeliveriesSub: 'Enregistrez une livraison à la réception des marchandises.',
+    outstandingDiscrepancies: "Cette commande reste {status} tant que ces écarts ne sont pas résolus.",
+    resolve: 'Résoudre', resolveDiscrepancy: "Résoudre l'écart", resolving: 'Résolution…',
+    resolutionNotes: "Comment l'écart a été résolu",
+    resolutionNotesHint: "Obligatoire. Conservé sur la livraison à côté de l'écart initial — la résolution ne l'efface pas.",
+    resolvedDiscrepancy: 'Écart résolu', resolvedBy: 'Résolu par', resolvedOn: 'Résolu le',
+    reopenDiscrepancy: 'Rouvrir', reopening: 'Réouverture…',
+    originalShortfall: 'Écart initial',
+    deliveriesReadOnly: 'Vous avez un accès en lecture seule aux livraisons.',
+    poNotOpenHint: 'Les livraisons ne peuvent être enregistrées que sur une commande ouverte.',
+    complete: 'Complète', incomplete: 'Incomplète',
+    poNumber: 'N° de bon de commande', issueDate: "Date d'émission", expectedDelivery: 'Livraison prévue',
+    deliveryTerms: 'Conditions de livraison', paymentTerms: 'Conditions de paiement', poTotal: 'Montant de la commande (USD)',
+    poIssued: 'Bon de commande émis', poReadiness: "Avant de pouvoir émettre un bon de commande :",
+    needApproved: 'la demande doit être approuvée', needQuotes: 'au moins {required} devis enregistrés',
+    needWinner: 'un devis retenu', poVendorLocked: 'Le fournisseur provient du devis retenu et ne peut pas être modifié.',
+    // Paramètres des achats
+    procurementRules: 'Règles et seuils', procurementSettings: 'Paramètres des achats',
+    procurementSettingsSub: "Seuils appliqués par la base de données à chaque demande et commande de cette organisation.",
+    financeApprovalThreshold: "Seuil d'approbation par les finances (USD)",
+    financeApprovalThresholdHint: "À partir de ce montant, seul un propriétaire ou un responsable financier peut approuver une demande. En dessous, un coordinateur le peut.",
+    quotesRequiredThreshold: 'Seuil de mise en concurrence (USD)',
+    quotesRequiredThresholdHint: "À partir de ce montant, le bon de commande est refusé tant que le nombre minimal de devis n'a pas été enregistré.",
+    minQuotesRequired: 'Nombre minimal de devis',
+    minQuotesRequiredHint: 'Au moins 1. Ne concerne que les demandes atteignant le seuil de mise en concurrence.',
+    settingsReadOnly: 'Seul un propriétaire ou un responsable financier peut modifier ces seuils.',
+    settingsSaved: "Seuils enregistrés. Ils s'appliquent à toute demande et commande à partir de maintenant.",
+    settingsMissing: "Aucun paramètre d'achat n'existe encore pour cette organisation.",
+    settingsMissingSub: 'Un propriétaire ou un responsable financier doit les créer avant que les seuils puissent être appliqués.',
+    settingsAppliesNow: "Modifier un seuil ne rouvre pas les demandes déjà approuvées sous l'ancien seuil.",
+    lastUpdated: 'Dernière modification',
+    thresholdHistory: 'Modifications des seuils', noThresholdHistory: 'Aucune modification de seuil enregistrée.',
+    changedFromTo: '{field} : {from} → {to}', thresholdHistoryHint: 'Les dix modifications les plus récentes.',
+    statusIssued: 'Émise', statusPartiallyReceived: 'Partiellement reçue',
+    statusReceived: 'Reçue', statusCancelled2: 'Annulée', statusClosed: 'Clôturée',
+    quotes: 'Devis', addQuote: 'Ajouter un devis', newQuote: 'Nouveau devis',
+    vendor: 'Fournisseur', quoteRef: 'Référence du devis', quoteDate: 'Date du devis',
+    quoteTotal: 'Montant du devis (USD)', validUntil: "Valable jusqu'au", attachmentRef: 'Référence de la pièce jointe',
+    selectWinner: 'Retenir ce devis', selected: 'Retenu', lowest: 'Le plus bas',
+    selectionJustification: 'Pourquoi ce fournisseur ?',
+    selectionJustificationHint: "Obligatoire. Consigné dans la piste d'audit avec les montants comparés.",
+    quotesProgress: '{actual} devis sur {required}',
+    winnerChosen: 'Devis retenu', noWinnerYet: 'Aucun devis retenu',
+    quotesNotRequired: 'En dessous du seuil de {threshold} — les devis concurrentiels ne sont pas requis.',
+    noQuotes: 'Aucun devis enregistré', noQuotesSub: 'Ajoutez les devis des fournisseurs pour les comparer ici.',
+    quotesReadOnly: 'Vous avez un accès en lecture seule aux devis.',
+    backToRequests: 'Retour aux demandes', requestDetail: 'Détail de la demande',
+    noApprovedVendors: 'Aucun fournisseur disponible. Les fournisseurs sur liste noire ne peuvent pas être consultés.',
+    selecting: 'Sélection…',
+    reject: 'Rejeter', rejectRequest: 'Rejeter la demande', rejectionReason: 'Motif du rejet',
+    rejectionReasonHint: "Obligatoire. Conservé sur la demande et affiché à son auteur.",
+    noPendingApprovals: 'Aucune demande en attente',
+    noPendingApprovalsSub: "Les demandes apparaissent ici une fois soumises pour approbation.",
+    approvalReadOnly: "Vous avez un accès en lecture seule à la file d'approbation.",
+    raisedBy: 'Demandé par', approving: 'Approbation…', rejecting: 'Rejet…',
+    financeThresholdNote: "Les demandes de {threshold} ou plus nécessitent l'approbation du service financier ou du propriétaire.",
+    statusDraft: 'Brouillon', statusSubmitted: 'Soumise', statusApproved: 'Approuvée',
+    statusRejected: 'Rejetée', statusCancelled: 'Annulée', statusOrdered: 'Commandée',
+    statusCompleted: 'Terminée',
+    authErrors: {
+      invalid_credentials: "Cet e-mail ou ce mot de passe est incorrect.",
+      email_not_confirmed: "Confirmez votre adresse e-mail avant de vous connecter.",
+      over_request_rate_limit: 'Trop de tentatives. Patientez un instant et réessayez.',
+      user_already_exists: "Un compte existe déjà pour cette adresse e-mail. Connectez-vous ou utilisez une autre adresse.",
+      weak_password: 'Ce mot de passe est trop faible. Utilisez au moins 8 caractères.',
+      invalid_email: "Cette adresse e-mail n'est pas valide. Vérifiez qu'elle ne contient pas d'erreur — certains domaines, comme .test, ne sont pas acceptés.",
+      generic: "Une erreur s'est produite. Veuillez réessayer.",
+    } satisfies AuthErrorStrings,
+    authLinkErrors: {
+      link_expired: "Ce lien a expiré. Si vous avez déjà confirmé votre adresse e-mail, connectez-vous avec votre mot de passe ; sinon, demandez un nouveau lien.",
+      link_used: "Ce lien de confirmation a déjà été utilisé. Essayez de vous connecter avec votre e-mail et votre mot de passe.",
+      link_invalid: "Ce lien de confirmation n'a pas pu être lu. Vérifiez que vous avez ouvert le message le plus récent, ou demandez un nouveau lien.",
+    } as Record<string, string>,
+    // Procurement errors
+    procErrors: {
+      PROC_VENDOR_BLACKLISTED: "Impossible d'émettre un bon de commande à {vendor} — ce fournisseur est sur liste noire ({reason}).",
+      PROC_REQUEST_NOT_APPROVED: "La demande {request_no} doit d'abord être approuvée (statut actuel : {status}).",
+      PROC_INSUFFICIENT_QUOTES: 'Les achats de {threshold} USD ou plus exigent au moins {required} devis concurrentiels. Seulement {actual} enregistré(s) sur {request_no}.',
+      PROC_NO_QUOTE_SELECTED: "Sélectionnez le devis retenu sur {request_no} et indiquez la justification avant d'émettre le bon de commande.",
+      PROC_VENDOR_MISMATCH: 'Ce bon de commande désigne un fournisseur différent de celui du devis retenu sur {request_no}.',
+      PROC_APPROVAL_ROLE_REQUIRED: "Les demandes de {threshold} USD ou plus nécessitent l'approbation du service financier ou du propriétaire (celle-ci est de {amount}).",
+      PROC_SELF_APPROVAL: "Vous avez créé la demande {request_no} et ne pouvez pas l'approuver vous-même. Une autre personne doit le faire.",
+      PROC_REQUESTER_IMMUTABLE: "Le demandeur de {request_no} ne peut pas être modifié.",
+      PROC_PO_NOT_OPEN: "Plus rien ne peut être enregistré sur {po_number} — la commande est {status}.",
+      PROC_STATUS_UPDATE_FAILED: "Livraison enregistrée mais le statut de la commande n'a pas pu être mis à jour.",
+      quotes_selected_needs_justification: 'Indiquez pourquoi ce fournisseur a été retenu avant de sélectionner ce devis.',
+      PROC_SELF_ROLE_CHANGE: "Vous ne pouvez pas modifier votre propre rôle ni votre organisation. Adressez-vous à un propriétaire de votre organisation.",
+      PROC_ROLE_CHANGE_DENIED: "Seul un propriétaire de cette organisation peut modifier le rôle d'un membre.",
+      PROC_ORG_IMMUTABLE: "Un membre ne peut pas être transféré vers une autre organisation.",
+      PROC_ORG_NAME_REQUIRED: 'Saisissez un nom pour votre organisation.',
+      PROC_ALREADY_IN_ORG: 'Vous appartenez déjà à une organisation.',
+      PROC_NOT_SIGNED_IN: 'Vous devez être connecté pour effectuer cette action.',
+      PROC_ORG_BIND_FAILED: "L'organisation n'a pas été créée correctement. Rien n'a été enregistré — veuillez réessayer.",
+      quotes_one_selected_per_request: 'Un autre devis est déjà sélectionné pour cette demande.',
+      vendors_blacklist_needs_reason: 'Indiquez un motif avant de mettre ce fournisseur sur liste noire.',
+      vendors_org_id_name_key: 'Un fournisseur portant ce nom existe déjà.',
+      purchase_requests_rejection_needs_reason: 'Indiquez un motif avant de rejeter cette demande.',
+      quotes_purchase_request_id_vendor_id_key: 'Ce fournisseur a déjà soumis un devis pour cette demande.',
+      purchase_orders_one_per_request: 'Un bon de commande a déjà été émis pour cette demande.',
+      goods_received_discrepancy_needs_notes: "Décrivez ce qui manquait ou était endommagé avant d'enregistrer une livraison incomplète.",
+      goods_received_resolution_needs_notes: "Indiquez comment l'écart a été résolu avant de le clôturer.",
+      purchase_request_items_qty_check: 'La quantité doit être supérieure à zéro.',
+      purchase_request_items_unit_cost_estimate_usd_check: 'Le coût unitaire ne peut pas être négatif.',
+      purchase_requests_estimated_total_usd_check: 'Le total déclaré ne peut pas être négatif.',
+      quotes_total_usd_check: 'Le montant d\'un devis ne peut pas être négatif.',
+      purchase_orders_total_usd_check: 'Le montant d\'une commande ne peut pas être négatif.',
+      goods_received_items_qty_received_check: 'La quantité reçue ne peut pas être négative.',
+      procurement_settings_min_quotes_required_check: 'Au moins un devis doit être exigé.',
+      goods_received_only_incomplete_resolvable: 'Seule une livraison incomplète comporte un écart à résoudre.',
+      denied: "Vous n'avez pas la permission de faire cela.",
+      timeout: 'Le chargement a pris trop de temps. Vérifiez votre connexion et réessayez.',
+      generic: 'Une erreur est survenue. Veuillez réessayer.',
+    } satisfies ProcErrorStrings,
     // Alerts
     attendanceLow: (rate: number) => `Le taux de présence (${rate}%) est en dessous de l'objectif de 80%.`,
     reportsOverdue: (n: number) => `${n} rapport${n>1?'s sont':'  est'} en retard — vérifiez l'onglet Rapports.`,
   }
 }
+
+type Strings = typeof T.en
+
+/**
+ * Raw enum value -> translated label, for errors whose HINT carries a status.
+ * These reuse the badge strings rather than duplicating them, so a status only
+ * ever has one translation per context.
+ */
+export const requestStatusLabels = (t: Strings): Record<string, string> => ({
+  draft: t.statusDraft, submitted: t.statusSubmitted, approved: t.statusApproved,
+  rejected: t.statusRejected, cancelled: t.statusCancelled, ordered: t.statusOrdered,
+  completed: t.statusCompleted,
+})
+
+export const orderStatusLabels = (t: Strings): Record<string, string> => ({
+  issued: t.statusIssued, partially_received: t.statusPartiallyReceived,
+  received: t.statusReceived, cancelled: t.statusCancelled2, closed: t.statusClosed,
+})
 
 interface LangContextType {
   lang: Lang
@@ -169,17 +596,32 @@ interface LangContextType {
 
 const LangContext = createContext<LangContextType | null>(null)
 
-export function LangProvider({ children }: { children: ReactNode }) {
-  const [lang, setLangState] = useState<Lang>(() => {
-    if (typeof window !== 'undefined') {
-      return (localStorage.getItem('impactos_lang') as Lang) || 'en'
-    }
-    return 'en'
-  })
+export function LangProvider({ children, initialLang = 'en' }: {
+  children: ReactNode
+  /**
+   * Supplied by the server layout from the impactos_lang cookie. The server
+   * must render the same language the client hydrates with, so this can never
+   * be read from localStorage during render — doing so aborted hydration on
+   * every page for anyone whose stored language was not English.
+   */
+  initialLang?: Lang
+}) {
+  const [lang, setLangState] = useState<Lang>(initialLang)
 
   const setLang = (l: Lang) => {
     setLangState(l)
-    if (typeof window !== 'undefined') localStorage.setItem('impactos_lang', l)
+    if (typeof document !== 'undefined') {
+      // Cookie, not localStorage, so the server sees it on the next render.
+      document.cookie = `impactos_lang=${l}; path=/; max-age=31536000; samesite=lax`
+      // The <html lang> attribute is server-rendered from that cookie, so it
+      // only catches up on a full page load. Toggling is a client-side state
+      // change, which would otherwise leave French content announced as
+      // English until the next hard navigation — wrong pronunciation and
+      // wrong voice for a screen reader. Written here rather than in an
+      // effect: an effect would have to run on mount too, and touching the
+      // attribute React server-rendered is what causes hydration mismatches.
+      document.documentElement.lang = l
+    }
   }
 
   return (

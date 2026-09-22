@@ -1,17 +1,19 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState } from 'react'
 import { useApp } from '@/hooks/useApp'
+import { withTimeout } from '@/lib/withTimeout'
 import { useLang } from '@/context/LangContext'
 import { createClient } from '../../../../lib/supabase'
-import { Button, Card, CardHeader, Field, Input, Select, Table, TR, TD, Modal } from '@/components/ui'
+import { Button, Card, CardHeader, Field, Input, Select, Table, TR, TD, Modal, Alert } from '@/components/ui'
 import { statusBadge } from '@/components/ui'
 import { Settings, Users, User, Shield, Globe } from 'lucide-react'
+import { writeErrorKey, renderProcError, type ProcError } from '@/lib/pgError'
 import type { Profile } from '@/types'
 
 const ROLES = [
   { value: 'owner', label: 'Owner', labelFr: 'Propriétaire', desc: 'Full access to everything including finance' },
-  { value: 'finance_officer', label: 'Finance Officer', labelFr: 'Responsable financier', desc: 'Finance + all operations access' },
+  { value: 'finance', label: 'Finance Officer', labelFr: 'Responsable financier', desc: 'Finance + all operations access' },
   { value: 'coordinator', label: 'Coordinator', labelFr: 'Coordinateur', desc: 'Operations, HR, participants — no finance' },
   { value: 'staff', label: 'Staff', labelFr: 'Personnel', desc: 'View only — attendance and basic data' },
   { value: 'viewer', label: 'Viewer', labelFr: 'Observateur', desc: 'Read-only access — for donors, partners' },
@@ -19,7 +21,12 @@ const ROLES = [
 
 export default function SettingsPage() {
   const { profile, role, isAdmin, isFinance, orgId, refreshProjects } = useApp()
-  const { lang } = useLang()
+  // protect_profile_identity requires an OWNER of the same organisation to
+  // change a member's role — finance is not enough. Gating on isFinance would
+  // show a working-looking select whose every write the database refuses.
+  // The team list is already scoped to this organisation, so same-org holds.
+  const canManageRoles = role === 'owner'
+  const { lang, t } = useLang()
   const supabase = createClient()
 
   const [tab, setTab] = useState<'profile'|'team'|'organisation'>('profile')
@@ -36,26 +43,38 @@ export default function SettingsPage() {
 
   // Invite form
   const [invForm, setInvForm] = useState({ email: '', role: 'coordinator' })
+  const [inviteError, setInviteError] = useState<string | null>(null)
 
-  const loadTeam = useCallback(async () => {
-    const { data } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('org_id', orgId)
-      .order('first_name')
-    setTeam((data ?? []) as Profile[])
-  }, [orgId]) // eslint-disable-line
+  // Bumped by team mutations to re-run the fetch below.
+  const [reloadKey, setReloadKey] = useState(0)
+  const loadTeam = () => setReloadKey(k => k + 1)
 
   useEffect(() => {
-    loadTeam()
-    if (profile) {
-      setProfForm({
-        first_name: profile.first_name || '',
-        last_name: profile.last_name || '',
-        phone: profile.phone || '',
-      })
-    }
-  }, [profile, loadTeam])
+    let cancelled = false
+    ;(async () => {
+      const { data } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('org_id', orgId)
+        .order('first_name')
+      if (cancelled) return
+      setTeam((data ?? []) as Profile[])
+    })()
+    return () => { cancelled = true }
+  }, [orgId, reloadKey]) // eslint-disable-line
+
+  // The profile arrives asynchronously, so seed the form once it identifies a
+  // different person. Adjusting during render rather than in an effect keeps
+  // this from clobbering edits in progress on every profile refresh.
+  const [seededProfileId, setSeededProfileId] = useState(profile?.id)
+  if (profile && profile.id !== seededProfileId) {
+    setSeededProfileId(profile.id)
+    setProfForm({
+      first_name: profile.first_name || '',
+      last_name: profile.last_name || '',
+      phone: profile.phone || '',
+    })
+  }
 
   const saveProfile = async () => {
     if (!profile) return
@@ -69,23 +88,54 @@ export default function SettingsPage() {
     window.location.reload()
   }
 
+  // A select that snaps back to the old value is the only signal a refused
+  // role change gives. Disabling it while in flight at least says the request
+  // is still running rather than already finished.
+  const [busyId, setBusyId] = useState<string | null>(null)
+  // Stored unresolved so the wording follows the language toggle.
+  const [teamError, setTeamError] = useState<ProcError | null>(null)
+
   const updateRole = async (userId: string, newRole: string) => {
-    await supabase.from('profiles').update({ role: newRole }).eq('id', userId)
+    if (busyId) return
+    setBusyId(userId); setTeamError(null)
+    // .select() so an RLS denial, which returns zero rows rather than an
+    // error, is not read as success. The trigger refusals (PROC_*) arrive as
+    // real errors and are mapped by the same call.
+    const raced = await withTimeout(Promise.resolve(
+      supabase.from('profiles').update({ role: newRole }).eq('id', userId).select()
+    ))
+    setBusyId(null)
+    if (raced.timedOut) return setTeamError({ key: 'timeout', params: {} })
+    const failed = writeErrorKey(raced.value)
+    // Reload either way: on failure the select must snap back to the real
+    // value rather than sitting on the one the user picked.
     loadTeam()
+    if (failed) return setTeamError(failed)
   }
 
   const inviteUser = async () => {
     if (!invForm.email) return
-    setSaving(true)
+    setSaving(true); setInviteError(null)
     // Create auth user via Supabase admin — uses signUp in demo mode
-    const { data, error } = await supabase.auth.signUp({
+    const raced = await withTimeout(supabase.auth.signUp({
       email: invForm.email,
       password: Math.random().toString(36).slice(-12) + 'A1!',
       options: {
         data: { role: invForm.role, org_id: orgId }
       }
-    })
-    if (!error && data.user) {
+    }))
+    if (raced.timedOut) {
+      setSaving(false)
+      return setInviteError(t.procErrors.timeout)
+    }
+    const { data, error } = raced.value
+    // Previously the form cleared and closed regardless, so a failed invite
+    // looked exactly like a successful one.
+    if (error) {
+      setSaving(false)
+      return setInviteError(error.message)
+    }
+    if (data.user) {
       // Upsert profile
       await supabase.from('profiles').upsert({
         id: data.user.id,
@@ -103,9 +153,20 @@ export default function SettingsPage() {
     loadTeam()
   }
 
+  // Shares busyId with updateRole: both act on the same row, and changing
+  // someone's role while their deactivation is still in flight is not a
+  // sequence worth allowing.
   const deactivate = async (userId: string) => {
-    await supabase.from('profiles').update({ is_active: false }).eq('id', userId)
+    if (busyId) return
+    setBusyId(userId); setTeamError(null)
+    const raced = await withTimeout(Promise.resolve(
+      supabase.from('profiles').update({ is_active: false }).eq('id', userId).select()
+    ))
+    setBusyId(null)
+    if (raced.timedOut) return setTeamError({ key: 'timeout', params: {} })
+    const failed = writeErrorKey(raced.value)
     loadTeam()
+    if (failed) return setTeamError(failed)
   }
 
   return (
@@ -174,11 +235,15 @@ export default function SettingsPage() {
           <div className="flex justify-between items-center mb-4">
             <div className="text-sm text-gray-400">{team.length} member{team.length !== 1 ? 's' : ''} in AFRILEAD</div>
             {isFinance && (
-              <Button variant="primary" size="sm" onClick={() => setInviteOpen(true)}>
+              <Button variant="primary" size="sm" onClick={() => { setInviteError(null); setInviteOpen(true) }}>
                 + {lang === 'fr' ? 'Inviter un membre' : 'Invite member'}
               </Button>
             )}
           </div>
+
+          {teamError && (
+            <div className="mb-3"><Alert>{renderProcError(teamError, t.procErrors)}</Alert></div>
+          )}
 
           <Table headers={[
             lang === 'fr' ? 'Nom' : 'Name',
@@ -200,11 +265,12 @@ export default function SettingsPage() {
                 </TD>
                 <TD className="text-gray-400 text-xs">{m.email}</TD>
                 <TD>
-                  {isFinance && m.id !== profile?.id ? (
+                  {canManageRoles && m.id !== profile?.id ? (
                     <select
                       value={m.role}
                       onChange={e => updateRole(m.id, e.target.value)}
-                      className="text-xs border border-gray-200 rounded-lg px-2 py-1 bg-white focus:outline-none focus:border-indigo-400"
+                      disabled={busyId === m.id}
+                      className="text-xs border border-gray-200 rounded-lg px-2 py-1 bg-white focus:outline-none focus:border-indigo-400 disabled:opacity-40 disabled:cursor-wait"
                     >
                       {ROLES.map(r => (
                         <option key={r.value} value={r.value}>
@@ -222,8 +288,8 @@ export default function SettingsPage() {
                 {isFinance && (
                   <TD>
                     {m.id !== profile?.id && m.is_active && (
-                      <button onClick={() => deactivate(m.id)}
-                        className="text-xs text-red-400 hover:text-red-600 transition-colors">
+                      <button onClick={() => deactivate(m.id)} disabled={busyId === m.id}
+                        className="text-xs text-red-400 hover:text-red-600 transition-colors disabled:opacity-40 disabled:cursor-wait">
                         {lang === 'fr' ? 'Désactiver' : 'Deactivate'}
                       </button>
                     )}
@@ -294,6 +360,7 @@ export default function SettingsPage() {
           </>
         }>
         <div className="space-y-3">
+          <Alert>{inviteError}</Alert>
           <Field label="Email address">
             <Input type="email" value={invForm.email}
               onChange={e => setInvForm(f => ({ ...f, email: e.target.value }))}

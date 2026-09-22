@@ -9,7 +9,7 @@ import { useLang } from '@/context/LangContext'
 import {
   LayoutDashboard, FolderOpen, Users, UserSquare2, Heart,
   CalendarCheck, Package, TrendingUp, CreditCard,
-  CalendarDays, FileText, Menu, ChevronLeft, Settings
+  CalendarDays, FileText, Menu, ChevronLeft, Settings, Store, ClipboardList, CheckSquare, SlidersHorizontal
 } from 'lucide-react'
 
 export function Sidebar() {
@@ -30,6 +30,11 @@ export function Sidebar() {
     { href: '/dashboard/attendance', label: t.attendance, icon: CalendarCheck },
     { href: '/dashboard/supply', label: t.supply, icon: Package },
     { href: '/dashboard/kpis', label: t.kpis, icon: TrendingUp },
+    { section: t.procurement },
+    { href: '/dashboard/procurement/vendors', label: t.vendors, icon: Store },
+    { href: '/dashboard/procurement/requests', label: t.requests, icon: ClipboardList },
+    { href: '/dashboard/procurement/approvals', label: t.approvals, icon: CheckSquare },
+    { href: '/dashboard/procurement/settings', label: t.procurementRules, icon: SlidersHorizontal },
     { section: t.finance, financeGate: true },
     { href: '/dashboard/finance', label: t.finance, icon: CreditCard, financeOnly: true },
     { section: t.planning },

@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState } from 'react'
 import { useApp } from '@/hooks/useApp'
 import { createClient } from '../../../../lib/supabase'
 import { Button, Modal, Field, Input, Select, Table, TR, TD, EmptyState } from '@/components/ui'
@@ -16,13 +16,21 @@ export default function DonorsPage() {
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({ name:'', type:'Government', contact:'', email:'', amount:'', status:'active', due:'', notes:'' })
 
-  const load = useCallback(async () => {
-    if (!activeProject) return
-    const { data } = await supabase.from('donors').select('*').eq('project_id', activeProject.id).order('created_at', { ascending: false })
-    setDonors((data ?? []) as Donor[])
-  }, [activeProject]) // eslint-disable-line
+  // Bumped by mutations to re-run the fetch below. The effect owns the query so
+  // a project switch mid-flight cannot land stale rows.
+  const [reloadKey, setReloadKey] = useState(0)
+  const load = () => setReloadKey(k => k + 1)
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    if (!activeProject) return
+    let cancelled = false
+    ;(async () => {
+      const { data } = await supabase.from('donors').select('*').eq('project_id', activeProject.id).order('created_at', { ascending: false })
+      if (cancelled) return
+      setDonors((data ?? []) as Donor[])
+    })()
+    return () => { cancelled = true }
+  }, [activeProject, reloadKey]) // eslint-disable-line
 
   const addDonor = async () => {
     if (!form.name || !activeProject) return
@@ -37,8 +45,17 @@ export default function DonorsPage() {
     setOpen(false); setSaving(false); load()
   }
 
+
+  // A delete with no pending state looks identical to a delete that was
+  // refused: the row is still there and nothing moved. Disabling the control
+  // while the write is in flight is the difference between the two.
+  const [busyId, setBusyId] = useState<string | null>(null)
+
   const removeDonor = async (id: string) => {
-    await supabase.from('donors').delete().eq('id', id); load()
+    if (busyId) return
+    setBusyId(id)
+    await supabase.from('donors').delete().eq('id', id)
+    setBusyId(null); load()
   }
 
   if (!activeProject) return <div className="text-gray-400 text-sm p-4">Select a project first.</div>
@@ -72,7 +89,8 @@ export default function DonorsPage() {
               {d.report_due && <div className="text-xs text-gray-400">Report due: {d.report_due}</div>}
               {d.notes && <div className="text-xs text-gray-400 italic mt-1">{d.notes}</div>}
               {isAdmin && (
-                <button onClick={() => removeDonor(d.id)} className="mt-2 text-red-300 hover:text-red-500"><Trash2 size={13}/></button>
+                <button onClick={() => removeDonor(d.id)} disabled={busyId === d.id}
+                  className="mt-2 text-red-300 hover:text-red-500 disabled:opacity-40 disabled:cursor-wait"><Trash2 size={13}/></button>
               )}
             </div>
           ))}
