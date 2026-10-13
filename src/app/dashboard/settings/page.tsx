@@ -20,7 +20,7 @@ const ROLES = [
 ]
 
 export default function SettingsPage() {
-  const { profile, role, isAdmin, isFinance, orgId, refreshProjects } = useApp()
+  const { profile, role, isAdmin, isFinance, orgId, orgName, refreshProjects } = useApp()
   // protect_profile_identity requires an OWNER of the same organisation to
   // change a member's role — finance is not enough. Gating on isFinance would
   // show a working-looking select whose every write the database refuses.
@@ -31,6 +31,13 @@ export default function SettingsPage() {
 
   const [tab, setTab] = useState<'profile'|'team'|'organisation'>('profile')
   const [team, setTeam] = useState<Profile[]>([])
+  // This organisation's own row. The tab used to render AFRILEAD's name,
+  // registration number, website and owner's email as literals — shown to
+  // every tenant.
+  const [org, setOrg] = useState<{
+    name: string; city: string | null; country: string | null
+    website: string | null; email: string | null
+  } | null>(null)
   const [inviteOpen, setInviteOpen] = useState(false)
   const [saving, setSaving] = useState(false)
 
@@ -50,6 +57,21 @@ export default function SettingsPage() {
   const loadTeam = () => setReloadKey(k => k + 1)
 
   useEffect(() => {
+    if (!orgId) return
+    let cancelled = false
+    ;(async () => {
+      const res = await withTimeout(Promise.resolve(
+        supabase.from('organisations')
+          .select('name, city, country, website, email')
+          .eq('id', orgId).maybeSingle()
+      ))
+      if (!cancelled && !res.timedOut) setOrg(res.value.data)
+    })()
+    return () => { cancelled = true }
+  }, [orgId]) // eslint-disable-line
+
+  useEffect(() => {
+    if (!orgId) return
     let cancelled = false
     ;(async () => {
       const { data } = await supabase
@@ -233,7 +255,7 @@ export default function SettingsPage() {
       {tab === 'team' && (
         <div>
           <div className="flex justify-between items-center mb-4">
-            <div className="text-sm text-gray-400">{team.length} member{team.length !== 1 ? 's' : ''} in AFRILEAD</div>
+            <div className="text-sm text-gray-400">{team.length} member{team.length !== 1 ? 's' : ''} in {orgName ?? '…'}</div>
             {isFinance && (
               <Button variant="primary" size="sm" onClick={() => { setInviteError(null); setInviteOpen(true) }}>
                 + {lang === 'fr' ? 'Inviter un membre' : 'Invite member'}
@@ -320,20 +342,20 @@ export default function SettingsPage() {
       {tab === 'organisation' && (
         <div className="max-w-lg">
           <Card>
-            <CardHeader title="AFRILEAD" />
+            <CardHeader title={org?.name ?? orgName ?? '…'} />
             <div className="space-y-3">
               <div className="flex items-center gap-2 p-3 bg-gray-50 rounded-lg">
                 <Globe size={16} className="text-gray-400" />
                 <div>
-                  <div className="text-sm font-medium text-gray-900">African Leadership Development Center</div>
-                  <div className="text-xs text-gray-400">Association N° 000151/ADR/J06/APPA · Yaoundé, Cameroon</div>
+                  <div className="text-sm font-medium text-gray-900">{org?.name ?? '…'}</div>
+                  <div className="text-xs text-gray-400">{[org?.city, org?.country].filter(Boolean).join(', ') || '—'}</div>
                 </div>
               </div>
               <Field label="Website">
-                <Input value="afrilead.org" disabled className="opacity-50" />
+                <Input value={org?.website ?? ''} placeholder="—" disabled className="opacity-50" />
               </Field>
               <Field label="Email">
-                <Input value="equip2lead@gmail.com" disabled className="opacity-50" />
+                <Input value={org?.email ?? ''} placeholder="—" disabled className="opacity-50" />
               </Field>
               <Field label="Platform URL">
                 <Input value="app.useimpactos.com" disabled className="opacity-50" />
@@ -364,7 +386,7 @@ export default function SettingsPage() {
           <Field label="Email address">
             <Input type="email" value={invForm.email}
               onChange={e => setInvForm(f => ({ ...f, email: e.target.value }))}
-              placeholder="colleague@afrilead.org" />
+              placeholder="colleague@yourorg.org" />
           </Field>
           <Field label={lang === 'fr' ? 'Rôle' : 'Role'}>
             <Select value={invForm.role} onChange={e => setInvForm(f => ({ ...f, role: e.target.value }))}>

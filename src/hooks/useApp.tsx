@@ -20,15 +20,20 @@ interface AppContextType {
   role: UserRole
   isFinance: boolean
   isAdmin: boolean
-  orgId: string
+  /**
+   * The signed-in user's organisation, read from their profile. Null until the
+   * profile resolves, and for a user who has none yet — OrgGate holds the
+   * dashboard in that case, so screens behind it can rely on it being set.
+   */
+  orgId: string | null
+  /** The organisation's display name; null until it resolves. */
+  orgName: string | null
   loading: boolean
   refreshProjects: () => Promise<void>
   signOut: () => Promise<void>
 }
 
 const AppContext = createContext<AppContextType | null>(null)
-const ORG_ID = 'a0000000-0000-0000-0000-000000000001'
-
 /**
  * The auth cookie @supabase/ssr writes for this project. Used to tell a genuine
  * signed-out state from one where a session exists that the client failed to
@@ -43,6 +48,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [projects, setProjects] = useState<Project[]>([])
   const [profile, setProfile] = useState<Profile | null>(null)
   const [profileError, setProfileError] = useState<string | null>(null)
+  // Keyed by the organisation it was read for, so a name can never outlive
+  // the user who loaded it.
+  const [orgNameFor, setOrgNameFor] = useState<{ org: string; name: string | null } | null>(null)
   const [authTick, setAuthTick] = useState(0)
   const [loading, setLoading] = useState(true)
   const supabase = createClient()
@@ -50,6 +58,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const role: UserRole = (profile?.role ?? 'viewer') as UserRole
   const isFinance = role === 'owner' || role === 'finance'
   const isAdmin = isFinance || role === 'coordinator'
+  const orgId = profile?.org_id ?? null
+  const orgName = orgId && orgNameFor?.org === orgId ? orgNameFor.name : null
 
   const setActiveProject = (p: Project | null) => {
     setActiveProjectState(p)
@@ -59,26 +69,52 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  const refreshProjects = async () => {
+  // Takes the organisation explicitly: init() calls this before the profile it
+  // just read has reached state, so closing over orgId would query with the
+  // previous user's organisation — or none.
+  //
+  // This filtered on a hardcoded AFRILEAD UUID until 2026-10-13, so every other
+  // organisation saw zero projects. RLS scopes projects too; the filter is kept
+  // so the query states what it means, not so it can be trusted alone.
+  const loadProjects = async (forOrg: string | null) => {
+    if (!forOrg) {
+      setProjects([])
+      setActiveProjectState(null)
+      return
+    }
     const { data } = await supabase
       .from('projects')
       .select('*')
-      .eq('org_id', ORG_ID)
+      .eq('org_id', forOrg)
       .order('created_at', { ascending: false })
     if (data) {
       setProjects(data)
       const savedId = typeof window !== 'undefined'
         ? localStorage.getItem('impactos_active_project')
         : null
-      if (savedId) {
-        const found = data.find((p: Project) => p.id === savedId)
-        if (found) setActiveProjectState(found)
-        else if (data.length > 0) setActiveProjectState(data[0])
-      } else if (data.length > 0 && !activeProject) {
-        setActiveProjectState(data[0])
-      }
+      // Always chosen from this organisation's list. Keeping whatever was
+      // active before could keep another organisation's project selected
+      // after a different user signs in on the same browser.
+      const found = savedId ? data.find((p: Project) => p.id === savedId) : undefined
+      setActiveProjectState(found ?? data[0] ?? null)
     }
   }
+
+  const refreshProjects = () => loadProjects(orgId)
+
+  // The organisation's name, for the screens that used to say "AFRILEAD".
+  useEffect(() => {
+    if (!orgId) return
+    let cancelled = false
+    ;(async () => {
+      const res = await withTimeout(Promise.resolve(
+        supabase.from('organisations').select('name').eq('id', orgId).maybeSingle()
+      ))
+      if (cancelled || res.timedOut) return
+      setOrgNameFor({ org: orgId, name: (res.value.data as { name: string } | null)?.name ?? null })
+    })()
+    return () => { cancelled = true }
+  }, [orgId]) // eslint-disable-line
 
   const signOut = async () => {
     // Clear local state FIRST. Awaiting supabase.auth.signOut() is unsafe: when
@@ -130,7 +166,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           // not degrade silently into the role defaults.
           setProfileError('Session cookie present but no user could be read from it')
         }
-        await refreshProjects()
+        await loadProjects(null)
         setLoading(false)
         return
       }
@@ -152,32 +188,40 @@ export function AppProvider({ children }: { children: ReactNode }) {
           // PGRST116 is "no rows", which the auto-create below handles.
           // Anything else is a real failure and must not be defaulted away.
           setProfileError(profErr.message)
-          await refreshProjects()
+          await loadProjects(null)
           setLoading(false)
           return
         } else {
-          // Auto-create profile for first-time users
+          // No profile row. handle_new_user creates one for every signup, so
+          // this is a leftover: an account from before that trigger, or one
+          // whose row was removed. Recreate it with identity only.
+          //
+          // org_id and role are deliberately NOT sent. This used to write
+          // AFRILEAD's hardcoded UUID and 'viewer', silently placing any
+          // profile-less user inside AFRILEAD. With neither set, the column
+          // defaults apply and OrgGate asks the user to create an organisation;
+          // joining one is by invitation, decided server-side.
           const nameParts = (user.email?.split('@')[0] ?? 'User').split('.')
-          const newProfile = {
-            id: user.id,
-            org_id: ORG_ID,
-            first_name: nameParts[0] ?? 'User',
-            last_name: nameParts[1] ?? '',
-            email: user.email ?? '',
-            role: 'viewer' as UserRole,
-            is_active: true,
-          }
           const { data: created, error: createErr } = await supabase
             .from('profiles')
-            .upsert(newProfile)
+            .insert({
+              id: user.id,
+              first_name: nameParts[0] ?? 'User',
+              last_name: nameParts[1] ?? '',
+              email: user.email ?? '',
+            })
             .select()
             .single()
           if (created) { setProfile(created as Profile); setProfileError(null) }
           else setProfileError(createErr?.message ?? 'Profile could not be created')
+          await withTimeout(loadProjects((created as Profile | null)?.org_id ?? null))
+          setLoading(false)
+          return
         }
+        await withTimeout(loadProjects((prof as Profile).org_id ?? null))
+        setLoading(false)
+        return
       }
-      await withTimeout(refreshProjects())
-      setLoading(false)
     }
 
     init()
@@ -227,7 +271,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     <AppContext.Provider value={{
       activeProject, setActiveProject, projects, profile,
       profileError, retryProfile: () => setAuthTick(t => t + 1),
-      role, isFinance, isAdmin, orgId: ORG_ID,
+      role, isFinance, isAdmin, orgId, orgName,
       loading, refreshProjects, signOut
     }}>
       {children}

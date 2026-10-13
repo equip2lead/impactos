@@ -6,7 +6,7 @@ import { LangProvider } from '@/context/LangContext'
 
 export const metadata: Metadata = {
   title: 'IMPACTOS — Program Management',
-  description: 'NGO & Program Management Platform by AFRILEAD',
+  description: 'NGO & Program Management Platform',
   manifest: '/manifest.json',
 }
 

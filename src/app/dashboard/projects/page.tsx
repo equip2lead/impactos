@@ -30,7 +30,7 @@ export default function ProjectsPage() {
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
   const handleCreate = async () => {
-    if (!form.name) return
+    if (!form.name || !orgId) return
     setSaving(true)
     const raced = await withTimeout(Promise.resolve(supabase.from('projects').insert({
       org_id: orgId, name: form.name, project_type: form.type,

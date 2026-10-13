@@ -188,7 +188,7 @@ export default function RegisterPage() {
               <div>
                 <label style={{ fontSize: '11px', fontWeight: 600, color: '#555', display: 'block', marginBottom: '4px' }}>{t.orgName} *</label>
                 <input value={org.name} onChange={e => setOrg(o => ({ ...o, name: e.target.value }))}
-                  placeholder="e.g. AFRILEAD" style={inputStyle} />
+                  placeholder="e.g. Hope & Light Foundation" style={inputStyle} />
               </div>
               <div>
                 <label style={{ fontSize: '11px', fontWeight: 600, color: '#555', display: 'block', marginBottom: '4px' }}>{t.orgType} *</label>

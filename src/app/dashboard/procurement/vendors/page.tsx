@@ -65,6 +65,8 @@ export default function VendorsPage() {
   const load = () => setReloadKey(k => k + 1)
 
   useEffect(() => {
+    // Null until the profile resolves; the effect re-runs when it arrives.
+    if (!orgId) return
     let cancelled = false
     ;(async () => {
       // Raced: a stalled query would leave the page on "Loading…" with no
@@ -104,7 +106,7 @@ export default function VendorsPage() {
 
   const save = async () => {
     const name = form.name.trim()
-    if (!name) return
+    if (!name || !orgId) return
     setSaving(true); setFormError(null)
 
     // Only ever send the fields the user edits. Doc numbers, flags and

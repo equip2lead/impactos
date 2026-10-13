@@ -15,7 +15,6 @@ export async function POST(req: Request) {
       { data: income },
       { data: expenses },
       { data: reports },
-      { data: org },
     ] = await Promise.all([
       supabase.from('projects').select('*').eq('id', projectId).single(),
       supabase.from('participants').select('*').eq('project_id', projectId),
@@ -24,10 +23,14 @@ export async function POST(req: Request) {
       supabase.from('income').select('*').eq('project_id', projectId),
       supabase.from('expenses').select('*').eq('project_id', projectId),
       supabase.from('reports').select('*').eq('project_id', projectId).order('due_date'),
-      supabase.from('organisations').select('*').single(),
     ])
 
     if (!project) return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+
+    // The project's own organisation, by id. An unfiltered .single() only
+    // worked because RLS happens to show one organisation per user.
+    const { data: org } = await supabase
+      .from('organisations').select('*').eq('id', project.org_id).maybeSingle()
 
     const totalIncome = (income || []).reduce((s: number, i: Record<string, number>) => s + (i.amount || 0), 0)
     const totalExpenses = (expenses || []).reduce((s: number, e: Record<string, number>) => s + (e.amount || 0), 0)
@@ -126,7 +129,7 @@ export async function POST(req: Request) {
       </div>
       <div class="title">${L.title}</div>
       <div class="project-name">${project.name}</div>
-      <div class="org-name">${org?.name || 'AFRILEAD'}</div>
+      <div class="org-name">${org?.name ?? ''}</div>
     </div>
     <div class="header-meta">
       <div>${L.generatedOn}</div>
@@ -234,7 +237,7 @@ export async function POST(req: Request) {
   <!-- FOOTER -->
   <div class="footer">
     <span>IMPACTOS · app.useimpactos.com</span>
-    <span>${org?.name || 'AFRILEAD'} · ${project.name}</span>
+    <span>${org?.name ?? ''} · ${project.name}</span>
     <span>${today}</span>
   </div>
   <div class="confidential">${L.confidential}</div>

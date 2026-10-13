@@ -10,8 +10,6 @@ import { Plus, Trash2, PlusCircle } from 'lucide-react'
 import { fmt } from '@/lib/utils'
 import type { Staff, StaffAssignment, Payroll, LeaveRequest, StaffAttendanceSession } from '@/types'
 
-const ORG_ID = 'a0000000-0000-0000-0000-000000000001'
-
 export default function HRPage() {
   const { activeProject, isAdmin, isFinance, orgId } = useApp()
   const { t } = useLang()
@@ -35,9 +33,9 @@ export default function HRPage() {
   const [sessForm, setSessForm] = useState({ date: new Date().toISOString().slice(0,10), type:'Training' })
 
   const load = useCallback(async () => {
-    if (!activeProject) return
+    if (!activeProject || !orgId) return
     const [staffR, assignR, payR, leaveR, sessR] = await Promise.all([
-      supabase.from('staff').select('*').eq('org_id', ORG_ID).order('first_name'),
+      supabase.from('staff').select('*').eq('org_id', orgId).order('first_name'),
       supabase.from('staff_project_assignments').select('*').eq('project_id', activeProject.id).eq('is_active', true),
       supabase.from('payroll').select('*, staff(first_name,last_name)').eq('project_id', activeProject.id).order('paid_date', { ascending: false }),
       supabase.from('leave_requests').select('*, staff(first_name,last_name)').order('created_at', { ascending: false }),
@@ -50,15 +48,15 @@ export default function HRPage() {
     setPayroll((payR.data ?? []) as Payroll[])
     setLeave((leaveR.data ?? []) as LeaveRequest[])
     setStaffSessions((sessR.data ?? []) as StaffAttendanceSession[])
-  }, [activeProject]) // eslint-disable-line
+  }, [activeProject, orgId]) // eslint-disable-line
 
   useEffect(() => { load() }, [load])
 
   const addStaff = async () => {
-    if (!staffForm.fn || !staffForm.ln) return
+    if (!staffForm.fn || !staffForm.ln || !orgId) return
     setSaving(true)
     const raced = await withTimeout(Promise.resolve(supabase.from('staff').insert({
-      org_id: ORG_ID, first_name: staffForm.fn, last_name: staffForm.ln,
+      org_id: orgId, first_name: staffForm.fn, last_name: staffForm.ln,
       email: staffForm.email || null, role_title: staffForm.role || null,
       staff_type: staffForm.type, base_salary_usd: parseFloat(staffForm.salary) || 0,
       contract_end: staffForm.end || null, status: staffForm.status

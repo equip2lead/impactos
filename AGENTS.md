@@ -11,9 +11,15 @@ prepared for organisations other than AFRILEAD._
 
 IMPACTOS is program-management software for AFRILEAD, a Cameroonian NGO.
 Next.js App Router + Supabase, EN/FR throughout. It is now being made
-multi-tenant: AFRILEAD is the first customer, not the only one. ACCESS YAOUNDÉ
-is a live project with real donor, KPI and milestone data in it — do not treat
-that data as disposable.
+multi-tenant: AFRILEAD is the first customer, not the only one.
+
+**Production was wiped on 2026-10-13, deliberately.** ACCESS YAOUNDÉ turned
+out to be demo data; at the client's instruction the whole system was cleaned
+to start fresh, including the original AFRILEAD organisation
+(`a0000000-…-0001`) and the `@impactos.test` accounts. A new AFRILEAD
+organisation was created through the real signup flow the same day. Anything
+in this file describing pre-wipe data is history, not current state. What has
+not changed: whatever real customers put in from here on is not disposable.
 
 ## Built and runtime-verified
 
@@ -276,6 +282,32 @@ looks like a path.
 
 # Open work
 
+## Launch order (set 2026-10-13)
+
+Nobody outside the team is invited until items 1–2 are live.
+
+1. **Hardcoded `ORG_ID` + sweep.** Built and verified; see the correction under
+   0a. Awaiting deploy.
+2. **Custom SMTP** — Resend, sending from `auth.useimpactos.com`, SPF/DKIM/DMARC.
+   The built-in provider delivers only to Supabase team addresses, so signup
+   works for the team and fails for every real customer. Then raise the email
+   rate limit to ~100/hour, and enable the "sign-in method linked" notification.
+3. **Auth hygiene:** own copy for `over_email_send_rate_limit` ("We can't send
+   email right now…" — not "too many attempts", which blames a user who made
+   one); clear dead sessions (`user_not_found` / `session_not_found`) instead of
+   presenting them on every request; proxy uses `getClaims()` (local ES256
+   verification) instead of a `getUser()` round trip per request.
+4. **Turnstile, as one unit.** Supabase's CAPTCHA setting covers password
+   sign-in, signup, recover — and the settings invite, because it calls
+   `signUp`. So the widget ships on **login, register, reset-password and the
+   settings invite together**, deployed and confirmed sending tokens, and only
+   then is CAPTCHA enabled in Supabase. Enabling it with any of the four
+   missing locks that path out. Not a per-screen rollout.
+5. **Phone test** — reset email opened on a phone. Closes 0c.
+6. **Google sign-in** — new Google users may create an organisation via
+   OrgGate; same-address sign-in links identities (accepted, including the
+   inherited-org residual). Ship invites before that residual matters.
+
 ## 0a. UNFIXED — production is broken by migrations already applied
 
 **Live: commit `f85f01f`, deployed 21 April 2026. Schema is five months ahead
@@ -321,6 +353,22 @@ Pre-existing in the deployed build, unrelated to the migrations:
 
 The fix is to deploy, not to revert the schema — the current branch already
 corrects all three. That makes this a release decision, not a repair.
+
+**Correction (2026-10-13): that last paragraph was wrong about the
+hardcoded `ORG_ID`.** It was still in `useApp.tsx` — in the profile
+auto-create, in `refreshProjects()`'s filter, and exported to every screen as
+`orgId` — and `hr/page.tsx` carried its own copy. In production that meant:
+every organisation other than AFRILEAD saw zero projects, could not create a
+project (the insert named the dead UUID and RLS refused it, `42501`), saw no
+vendors and no team, and the settings Organisation tab showed AFRILEAD's name,
+registration number, website and owner email to every tenant. Tenant isolation
+held in the database and failed in the app. Fixed by reading `org_id` from the
+profile; verified by a two-organisation rolled-back impersonation run (15 of 15
+checks, both directions).
+
+**A claim of "fixed" in this file is not evidence.** It records what someone
+believed when they wrote it. Before relying on one, check the code or the
+database — the check here was a one-line grep that nobody ran.
 
 ## 0b. UNFIXED — any user can move themselves into another organisation
 
@@ -434,6 +482,22 @@ verified against that commit, so this has never worked.
 build, so any user who forgot their password has had no recovery path at all —
 not a degraded one, none. Anyone currently locked out has been locked out
 silently, and will not know to try again unless told.
+
+## 0d. UNFIXED — two policy defects found during the ORG_ID sweep
+
+Both need a migration, so neither was applied in the session that found them.
+
+- **`profiles` INSERT is still the 0b shape.** `protect_identity` is
+  `BEFORE UPDATE` only, and `Users can insert own profile` is
+  `WITH CHECK (id = auth.uid())`. A user with no profile row can insert one
+  naming any `org_id` and role. `handle_new_user` makes the state rare, not
+  impossible. Fix: fire the trigger on INSERT too, or pin `org_id IS NULL` and
+  the default role in the policy.
+- **Any member can edit their organisation's details.** `organisations` has
+  two UPDATE policies; `Owners can update their org` is
+  `USING (id = current_user_org())` with no role check, and policies are OR'ed,
+  so a viewer passes. The tenant sweep cannot see this: it checks that a policy
+  reaches a tenant anchor, not which role it admits. Fix: drop the duplicate.
 
 ## The rest
 

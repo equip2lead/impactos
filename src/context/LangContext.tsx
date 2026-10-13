@@ -17,7 +17,7 @@ const T = {
     // Auth
     signIn: 'Sign in', signOut: 'Sign out', email: 'Email address',
     password: 'Password', signingIn: 'Signing in…', welcomeBack: 'Welcome back',
-    signInSub: 'Sign in to IMPACTOS — AFRILEAD Program Management',
+    signInSub: 'Sign in to IMPACTOS — Program Management',
     noAccount: "Don't have an account?", contactAdmin: 'Contact your administrator.',
     // Dashboard
     programDashboard: 'Program Dashboard', selectProject: 'Select a project',
@@ -39,7 +39,7 @@ const T = {
     notes: 'Notes', amount: 'Amount (USD)', reference: 'Reference',
     // Projects
     newProject: 'New project', createProject: 'Create project',
-    allProjects: 'All projects', allPrograms: 'All programs across AFRILEAD',
+    allProjects: 'All projects', allPrograms: 'All programs in your organisation',
     projectName: 'Project name', projectType: 'Project type',
     description: 'Description', startDate: 'Start date', endDate: 'End date',
     budget: 'Total budget (USD)', participantTarget: 'Participant target',
@@ -69,7 +69,7 @@ const T = {
     leave: 'Leave', signInSheet: 'Staff sign-in sheet', saveSignIn: 'Save sign-in',
     logPayment: 'Log payment', leaveRequest: 'Leave request',
     present: 'Present', absent: 'Absent', notMarked: 'Not marked',
-    hrStaff: 'HR & Staff', assignedToProject: 'assigned to this project', totalInOrg: 'total in AFRILEAD',
+    hrStaff: 'HR & Staff', assignedToProject: 'assigned to this project', totalInOrg: 'total in your organisation',
     addStaffFirst: 'Add staff first.', sessionType: 'Session type', rate: 'Rate',
     addStaffMember: 'Add staff member', logPayrollDisbursement: 'Log payroll disbursement',
     submitLeaveRequest: 'Submit leave request', requestLeave: 'Request leave', submit: 'Submit',
@@ -304,7 +304,7 @@ const T = {
     // Auth
     signIn: 'Se connecter', signOut: 'Se déconnecter', email: 'Adresse e-mail',
     password: 'Mot de passe', signingIn: 'Connexion en cours…', welcomeBack: 'Bon retour',
-    signInSub: 'Connectez-vous à IMPACTOS — Gestion des programmes AFRILEAD',
+    signInSub: 'Connectez-vous à IMPACTOS — Gestion des programmes',
     noAccount: 'Pas de compte ?', contactAdmin: "Contactez votre administrateur.",
     // Dashboard
     programDashboard: 'Tableau de bord des programmes', selectProject: 'Sélectionner un projet',
@@ -326,7 +326,7 @@ const T = {
     notes: 'Notes', amount: 'Montant (USD)', reference: 'Référence',
     // Projects
     newProject: 'Nouveau projet', createProject: 'Créer le projet',
-    allProjects: 'Tous les projets', allPrograms: 'Tous les programmes AFRILEAD',
+    allProjects: 'Tous les projets', allPrograms: 'Tous les programmes de votre organisation',
     projectName: 'Nom du projet', projectType: 'Type de projet',
     description: 'Description', startDate: 'Date de début', endDate: 'Date de fin',
     budget: 'Budget total (USD)', participantTarget: 'Objectif participants',
@@ -356,7 +356,7 @@ const T = {
     leave: 'Congés', signInSheet: 'Feuille de présence', saveSignIn: 'Enregistrer la présence',
     logPayment: 'Enregistrer le paiement', leaveRequest: 'Demande de congé',
     present: 'Présent', absent: 'Absent', notMarked: 'Non marqué',
-    hrStaff: 'RH et personnel', assignedToProject: 'affectés à ce projet', totalInOrg: 'au total dans AFRILEAD',
+    hrStaff: 'RH et personnel', assignedToProject: 'affectés à ce projet', totalInOrg: 'au total dans votre organisation',
     addStaffFirst: "Ajoutez d'abord du personnel.", sessionType: 'Type de séance', rate: 'Taux',
     addStaffMember: 'Ajouter un membre du personnel', logPayrollDisbursement: 'Enregistrer un versement de salaire',
     submitLeaveRequest: 'Soumettre une demande de congé', requestLeave: 'Demander un congé', submit: 'Soumettre',
