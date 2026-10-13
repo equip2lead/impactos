@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { createClient } from '../../../lib/supabase'
 import { withTimeout } from '@/lib/withTimeout'
-import { authErrorMessage as authMessage } from '@/lib/authError'
+import { authErrorKey, type AuthErrorKey } from '@/lib/authError'
 import { useRouter } from 'next/navigation'
 import { useLang } from '@/context/LangContext'
 import Link from 'next/link'
@@ -17,7 +17,8 @@ export default function RegisterPage() {
   // T is the shared table; t below is the copy specific to this screen.
   const { lang, setLang, t: T } = useLang()
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+  // The key, not the copy: resolved at render so it follows the toggle.
+  const [error, setError] = useState<AuthErrorKey | null>(null)
   const [needsConfirmation, setNeedsConfirmation] = useState(false)
   const router = useRouter()
   const supabase = createClient()
@@ -46,9 +47,6 @@ export default function RegisterPage() {
       goToApp: 'Go to app →',
       haveAccount: 'Already have an account?', signIn: 'Sign in',
       types: { ngo: 'NGO / Non-profit', church: 'Church / Faith organisation', academy: 'Training academy', government: 'Government program', enterprise: 'Social enterprise', csr: 'CSR / Foundation', other: 'Other' },
-      passwordMismatch: 'Passwords do not match',
-      passwordShort: 'Password must be at least 8 characters',
-      orgNameRequired: 'Enter a name for your organisation',
       confirmTitle: 'Check your email',
       confirmSub: 'Your workspace is created. Confirm your email address to sign in for the first time.',
       doneSubReady: 'Your IMPACTOS workspace is ready and you are signed in.',
@@ -69,9 +67,6 @@ export default function RegisterPage() {
       goToApp: "Accéder à l'application →",
       haveAccount: 'Déjà un compte ?', signIn: 'Se connecter',
       types: { ngo: 'ONG / Association', church: 'Église / Organisation religieuse', academy: 'Académie de formation', government: 'Programme gouvernemental', enterprise: 'Entreprise sociale', csr: 'RSE / Fondation', other: 'Autre' },
-      passwordMismatch: 'Les mots de passe ne correspondent pas',
-      passwordShort: 'Le mot de passe doit contenir au moins 8 caractères',
-      orgNameRequired: 'Saisissez un nom pour votre organisation',
       confirmTitle: 'Vérifiez votre e-mail',
       confirmSub: "Votre espace est créé. Confirmez votre adresse e-mail pour vous connecter la première fois.",
       doneSubReady: 'Votre espace IMPACTOS est prêt et vous êtes connecté.',
@@ -82,11 +77,11 @@ export default function RegisterPage() {
   const stepIdx = steps.indexOf(step)
 
   const handleCreateWorkspace = async () => {
-    if (account.password !== account.confirm) return setError(t.passwordMismatch)
-    if (account.password.length < 8) return setError(t.passwordShort)
-    if (!org.name.trim()) return setError(t.orgNameRequired)
+    if (account.password !== account.confirm) return setError('password_mismatch')
+    if (account.password.length < 8) return setError('password_too_short')
+    if (!org.name.trim()) return setError('org_name_required')
     setLoading(true)
-    setError('')
+    setError(null)
 
     // One call. handle_new_user creates the profile, the organisation and the
     // ownership binding in a single transaction, so a failed signup cannot
@@ -128,11 +123,11 @@ export default function RegisterPage() {
       },
     }))
 
-    if (raced.timedOut) { setLoading(false); return setError(T.procErrors.timeout) }
+    if (raced.timedOut) { setLoading(false); return setError('timeout') }
     const { data, error: authErr } = raced.value
     if (authErr) {
       setLoading(false)
-      return setError(authMessage(authErr, T.authErrors) ?? T.procErrors.generic)
+      return setError(authErrorKey(authErr) ?? 'generic')
     }
 
     // With email confirmation on, signUp returns no session. Saying "signed
@@ -225,8 +220,8 @@ export default function RegisterPage() {
                   <input value={org.website} onChange={e => setOrg(o => ({ ...o, website: e.target.value }))} placeholder="yourorg.org" style={inputStyle} />
                 </div>
               </div>
-              {error && <div style={errorBoxStyle}>{error}</div>}
-              <button onClick={() => org.name.trim() ? setStep('account') : setError(t.orgNameRequired)}
+              {error && <div style={errorBoxStyle}>{T.authErrors[error]}</div>}
+              <button onClick={() => org.name.trim() ? setStep('account') : setError('org_name_required')}
                 style={btnStyle('#0A0A0A', '#fff')}>{t.next}</button>
             </div>
           )}
@@ -256,7 +251,7 @@ export default function RegisterPage() {
                 <label style={{ fontSize: '11px', fontWeight: 600, color: '#555', display: 'block', marginBottom: '4px' }}>{t.confirm} *</label>
                 <input type="password" value={account.confirm} onChange={e => setAccount(a => ({ ...a, confirm: e.target.value }))} style={inputStyle} />
               </div>
-              {error && <div style={errorBoxStyle}>{error}</div>}
+              {error && <div style={errorBoxStyle}>{T.authErrors[error]}</div>}
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button onClick={() => setStep('org')} style={btnStyle('#F4F6FA', '#0A0A0A')}>{t.back}</button>
                 <button onClick={handleCreateWorkspace} disabled={loading} style={{ ...btnStyle('#0A0A0A', '#fff'), flex: 1, opacity: loading ? 0.7 : 1 }}>

@@ -2,7 +2,9 @@ import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 import type { EmailOtpType } from '@supabase/supabase-js'
-import { authLinkErrorKey } from '@/lib/authLinkError'
+import {
+  authLinkErrorKey, linkFailurePath, safeNext, type AuthLinkErrorKey,
+} from '@/lib/authLinkError'
 
 // token_hash links are email links by construction; the SMS types cannot
 // arrive here. Narrowed explicitly so an unexpected value is refused as a
@@ -31,7 +33,7 @@ const asEmailOtpType = (v: string): EmailOtpType | null =>
  */
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
-  const next = searchParams.get('next') ?? '/dashboard'
+  const next = safeNext(searchParams.get('next'))
 
   const code = searchParams.get('code')
   const tokenHash = searchParams.get('token_hash')
@@ -40,9 +42,9 @@ export async function GET(request: Request) {
   const errCode = searchParams.get('error_code')
   const errDesc = searchParams.get('error_description')
 
-  const fail = (key: string, shape: string, detail?: unknown) => {
-    console.error(`[auth/callback] ${shape} -> ${key}`, detail ?? '')
-    return NextResponse.redirect(`${origin}/login?error=${key}`)
+  const fail = (key: AuthLinkErrorKey, shape: string, detail?: unknown) => {
+    console.error(`[auth/callback] ${shape} -> ${key} (next=${next})`, detail ?? '')
+    return NextResponse.redirect(`${origin}${linkFailurePath(next, key)}`)
   }
 
   // 1. GoTrue refused before we ever got a token.
@@ -73,7 +75,7 @@ export async function GET(request: Request) {
     const client = await supabase()
     const { error } = await client.auth.exchangeCodeForSession(code)
     if (!error) {
-      console.log('[auth/callback] pkce -> session established')
+      console.log(`[auth/callback] pkce -> session established (next=${next})`)
       return NextResponse.redirect(`${origin}${next}`)
     }
     return fail(
@@ -92,7 +94,7 @@ export async function GET(request: Request) {
     const client = await supabase()
     const { error } = await client.auth.verifyOtp({ type: otpType, token_hash: tokenHash })
     if (!error) {
-      console.log(`[auth/callback] token_hash (type=${type}) -> session established`)
+      console.log(`[auth/callback] token_hash (type=${type}) -> session established (next=${next})`)
       return NextResponse.redirect(`${origin}${next}`)
     }
     return fail(

@@ -254,6 +254,26 @@ shapes, confirming it flagged both, and dropping it — rather than trusting tha
 a checker written against known-good schema would fire on a bad one.
 
 
+# Rule: a user-supplied redirect target is validated same-origin before use
+
+Any value that arrives in a URL or form and is later used as a redirect
+destination — `next`, `redirectTo`, `returnUrl`, whatever it is called — is
+checked to be a same-origin absolute path **before** it is used. Fall back to a
+fixed path when it fails; never try to repair it.
+
+This is not hypothetical. `/auth/callback` built its redirect as
+`${origin}${next}`. `next=@evil.example` makes that
+`https://app.useimpactos.com@evil.example` — the origin becomes userinfo and
+the browser goes off-site. Anyone can mail a confirmation link carrying that
+parameter, and the redirect fires on a *successful* verification, so the
+victim lands on the attacker's page straight after a genuine IMPACTOS login.
+
+The check is `safeNext()` in `src/lib/authLinkError.ts`: the value must start
+with `/`, and must not start with `//` or `/\` (both are protocol-relative to a
+browser). Reuse it; do not write a second one. Concatenating a user value onto
+an origin is the shape to look for in review — it reads as harmless because it
+looks like a path.
+
 # Open work
 
 ## 0a. UNFIXED — production is broken by migrations already applied
@@ -340,7 +360,50 @@ restores them unless the caller is an owner of the same organisation. Whatever
 onboarding does must set them server-side (SECURITY DEFINER), never from the
 client — see the build order in Handover.
 
-## 0c. UNFIXED — password reset cannot complete, in dev and production alike
+## 0c. BUILT — awaiting deploy and phone verification
+
+**Status (2026-10-13):** the decided approach below is built. It is not done
+until the Reset Password template is switched (after deploy, never before) and
+the phone test passes: request on the laptop, open the email on a phone, set
+the new password there, sign in on the laptop with it. The Vercel log line that
+proves the cross-device path is
+`[auth/callback] token_hash (type=recovery) -> session established (next=/reset-password)`.
+
+What shipped with it:
+
+- The page reaches `reset` from either an existing session (the callback
+  verified the link server-side) or `PASSWORD_RECOVERY` (fragment links, and
+  pre-0c emails still pointing at `/reset-password?code=`).
+- A failed recovery link lands on `/reset-password?error=…`, not `/login` — the
+  reader cannot sign in, which is why they asked.
+- A missing PKCE verifier (`pkce_code_verifier_not_found`) maps to
+  `link_expired`, not `link_invalid`. It is the cross-device / too-late case,
+  the most common real failure, and "check you opened the most recent email"
+  is the wrong advice for it.
+- After the update, every session is signed out (`scope: 'global'`).
+- register, login and reset-password store an `AuthErrorKey` and resolve copy
+  at render, like `ProcError`.
+
+Verification record, against a local dev server with crafted links:
+
+| Link | Result |
+| --- | --- |
+| `token_hash=bogus&type=recovery&next=/reset-password` | `/reset-password?error=link_expired` |
+| `code=bogus&next=/reset-password` (no verifier) | `/reset-password?error=link_expired` |
+| `code=bogus&next=/dashboard` (no verifier) | `/login?error=link_expired` |
+| `token_hash=x&type=sms&next=/reset-password` | `/reset-password?error=link_invalid` |
+
+Hostile `next` values are **rejected, not routed**: `next=@evil.example`,
+`next=//evil.example` and `next=/\evil.example` are each discarded by
+`safeNext()` and replaced with `/dashboard` before any redirect is built. They
+are not failures that happened to land somewhere safe — the value never
+reaches a URL. See the redirect rule above.
+
+Not yet verified: the reset itself on a real account, and the phone path. Both
+need the deployed build and a real mailbox.
+
+### Original finding
+
 
 `reset-password/page.tsx` has four steps — `request`, `sent`, `reset`, `done` —
 and **nothing ever sets `step` to `'reset'`**. The only transitions are

@@ -4,7 +4,7 @@ import { Suspense, useState } from 'react'
 import { createClient } from '../../../lib/supabase'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useLang } from '@/context/LangContext'
-import { authErrorMessage } from '@/lib/authError'
+import { authErrorKey, type AuthErrorKey } from '@/lib/authError'
 import { isAuthLinkErrorKey } from '@/lib/authLinkError'
 import Link from 'next/link'
 
@@ -12,7 +12,8 @@ function LoginForm() {
   const { t, lang, setLang } = useLang()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
+  // The key, not the copy: resolved at render so it follows the toggle.
+  const [error, setError] = useState<AuthErrorKey | null>(null)
   const [loading, setLoading] = useState(false)
   const router = useRouter()
   const params = useSearchParams()
@@ -31,9 +32,9 @@ function LoginForm() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
-    setLoading(true); setError('')
+    setLoading(true); setError(null)
     const { error: err } = await supabase.auth.signInWithPassword({ email, password })
-    if (err) { setError(authErrorMessage(err, t.authErrors) ?? t.authErrors.generic); setLoading(false) }
+    if (err) { setError(authErrorKey(err) ?? 'generic'); setLoading(false) }
     else router.push('/dashboard')
   }
 
@@ -83,7 +84,7 @@ function LoginForm() {
 
             {(error || linkError) && (
               <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-xs text-red-700">
-                {error || linkError}
+                {error ? t.authErrors[error] : linkError}
               </div>
             )}
 

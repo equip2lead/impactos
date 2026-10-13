@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '../../../../../lib/supabase'
 import { useLang } from '@/context/LangContext'
-import { authLinkErrorKey } from '@/lib/authLinkError'
+import { authLinkErrorKey, linkFailurePath, safeNext } from '@/lib/authLinkError'
 
 /**
  * The implicit flow returns its tokens in the URL fragment, which browsers
@@ -22,7 +22,7 @@ function Finish() {
   useEffect(() => {
     let cancelled = false
     const run = async () => {
-      const next = params.get('next') ?? '/dashboard'
+      const next = safeNext(params.get('next'))
       // Strip the leading '#'. Nothing here is logged: the fragment carries
       // access and refresh tokens.
       const hash = new URLSearchParams(
@@ -35,7 +35,7 @@ function Finish() {
       if (err || errCode) {
         const key = authLinkErrorKey(errCode ?? err, errDesc)
         console.error(`[auth/callback/finish] fragment-error -> ${key}`)
-        return router.replace(`/login?error=${key}`)
+        return router.replace(linkFailurePath(next, key))
       }
 
       const accessToken = hash.get('access_token')
@@ -45,7 +45,7 @@ function Finish() {
         // recognise. This is also the path a user reaches by opening
         // /auth/callback directly.
         console.error('[auth/callback/finish] no token in query or fragment -> link_invalid')
-        return router.replace('/login?error=link_invalid')
+        return router.replace(linkFailurePath(next, 'link_invalid'))
       }
 
       const supabase = createClient()
@@ -57,7 +57,7 @@ function Finish() {
       if (error) {
         const key = authLinkErrorKey((error as { code?: string }).code, error.message)
         console.error(`[auth/callback/finish] fragment (type=${hash.get('type') ?? '?'}) -> ${key}`, error.message)
-        return router.replace(`/login?error=${key}`)
+        return router.replace(linkFailurePath(next, key))
       }
       console.log(`[auth/callback/finish] fragment (type=${hash.get('type') ?? '?'}) -> session established`)
       // Clear the fragment so the tokens do not sit in history.
