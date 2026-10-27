@@ -20,6 +20,16 @@
 // The allowlist of intentional exceptions lives in the SQL function, not here,
 // so adding one is a deliberate act with a stated reason rather than a quiet
 // loosening of a regex in a script.
+//
+// THREE PRODUCTS SHARE THIS DATABASE. Tables prefixed yg_ (Youghazi) and ds_
+// (DigiSmart) are separate products with a planned migration out, listed by
+// the SQL function audit_other_products(). They are excluded from the
+// tenant-anchor check, because IMPACTOS's organisation model does not apply to
+// them. They are NOT excluded from the coverage check: a table with RLS off is
+// open to anon over PostgREST whichever product owns it. Deliberate deny-all
+// tables (RLS on, zero policies, reached only through SECURITY DEFINER
+// functions) are named with reasons in audit_rls_coverage(). The exclusion is
+// printed on every run so it can never become invisible.
 import { createClient } from '@supabase/supabase-js'
 import { fileURLToPath } from 'node:url'
 
@@ -27,7 +37,10 @@ import { fileURLToPath } from 'node:url'
  * Pure reporting step. Exported so the decision logic can be exercised
  * without a database. Returns the intended process exit code.
  */
-export function report(unscoped, coverage, log = console.log, err = console.error) {
+export function report(unscoped, coverage, others = [], log = console.log, err = console.error) {
+  for (const o of others) {
+    log(`OUT OF TENANT SCOPE  ${o.prefix}*  ${o.product} — ${o.reason} (RLS coverage still checked)`)
+  }
   for (const r of coverage) {
     err(
       r.rls_enabled
@@ -69,14 +82,15 @@ async function main() {
     return data ?? []
   }
 
-  const [unscoped, coverage] = await Promise.all([
+  const [unscoped, coverage, others] = await Promise.all([
     call('audit_unscoped_policies'),
     call('audit_rls_coverage'),
+    call('audit_other_products'),
   ])
   // A sweep that could not run is not a sweep that passed.
-  if (unscoped === null || coverage === null) return 2
+  if (unscoped === null || coverage === null || others === null) return 2
 
-  return report(unscoped, coverage)
+  return report(unscoped, coverage, others)
 }
 
 // Only run when invoked directly; importing for `report` must not hit the network.

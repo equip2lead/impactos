@@ -6,8 +6,10 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 # Where this project stands
 
-_Last updated 2026-09-17. Procurement is complete; the project is being
-prepared for organisations other than AFRILEAD._
+_Last updated 2026-10-27. Procurement is complete; the project is being
+prepared for organisations other than AFRILEAD. The database is shared with
+two other products. Read "Rule: three products share this database" before
+any migration._
 
 IMPACTOS is program-management software for AFRILEAD, a Cameroonian NGO.
 Next.js App Router + Supabase, EN/FR throughout. It is now being made
@@ -183,6 +185,76 @@ Until step 4 lands, production carries five accounts with a shared password,
 one of which (`test.viewer`) was the probe used to demonstrate the item-0
 privilege escalation.
 
+# Rule: three products share this database
+
+_Recorded 2026-10-27._ Project `xkpukpwbitfmmoembhbg` hosts **IMPACTOS**,
+**Youghazi** (`yg_*`: products, orders, order_items, staff, settings,
+stock_movements, private) and **DigiSmart** (`ds_*`: leads, admin, events),
+all in `public`. This is deliberate: it avoids paying for a second Supabase
+project while pre-revenue. Youghazi and DigiSmart are tenants with a planned
+exit, not contamination. They move out once they are tested and earning.
+
+Rules, so that the exit stays cheap:
+
+- **Prefixes are strict.** Every Youghazi table, function, trigger and policy
+  is `yg_`, and every DigiSmart one is `ds_`. Never create an unprefixed object
+  for either. Unprefixed means IMPACTOS.
+- **Every migration names its product in its filename prefix**:
+  `impactos_…`, `youghazi_…`, `digismart_…`. (The pre-2026-10-20 history has
+  no prefix and is all IMPACTOS.)
+- **A migration for one product must not touch another product's objects.**
+  No cross-product foreign keys, triggers, function calls or policy references.
+- **The tenant sweep knows about the prefixes.** A new product means a new row
+  in `audit_other_products()`, not a looser regex. See "The sweep" below.
+
+**Verified 2026-10-27: there is nothing crossing between products in `public`.**
+No foreign key, trigger, function body or policy links an IMPACTOS object to a
+`yg_`/`ds_` one, in either direction. (Watch out: the regex `(yg|ds)_` also
+matches `goods_received`. Anchor it, as in `^(yg|ds)_`.)
+
+**What they DO share is `auth`, and that is where a split will hurt:**
+
+- `yg_staff.user_id` and `yg_stock_movements` have foreign keys to
+  `auth.users`. Moving Youghazi out means migrating its users too.
+- `on_auth_user_created → handle_new_user` is IMPACTOS code, and it runs for
+  *every* signup in the project. So every Youghazi staff account also gets an
+  IMPACTOS `profiles` row with no org. That person can then sign in at
+  app.useimpactos.com, and OrgGate will offer them a new organisation. In the
+  other direction, `yg_role()` links any confirmed auth user whose email
+  matches an unclaimed `yg_staff` row. Same email, same identity, both
+  products.
+- **SMTP, email templates, Site URL, the redirect allowlist, rate limits and
+  CAPTCHA are all per project.** Every change to auth settings made for
+  IMPACTOS also applies to Youghazi. In particular, the `token_hash`
+  Confirm-signup template (Deploy steps, step 1) is concatenated onto
+  `{{ .RedirectTo }}`, so it breaks any Youghazi signup whose `emailRedirectTo`
+  carries no query string. That template was switched on 2026-10-13.
+  **Checked 2026-10-27: no Youghazi signup has ever happened**, so nobody has
+  been broken. `auth.users` holds two accounts, both IMPACTOS. A failed
+  confirmation would still have left an unconfirmed `auth.users` row, and
+  there is none. Youghazi customers have no accounts (orders go through
+  `yg_place_order` as anon; there are zero orders). Its only staff row is an
+  unclaimed owner whose email matches the AFRILEAD owner account. That person
+  becomes Youghazi owner by *signing in*, which needs no confirmation email.
+  **Not checked: whether Youghazi's signup code would break.** Its source is
+  not in this repo or on this machine. Before Youghazi invites a second staff
+  member, confirm that its `emailRedirectTo` carries a query string.
+  Turnstile (launch item 4) would lock Youghazi out of sign-in unless it ships
+  the widget too.
+
+**Why the split happens before IMPACTOS has paying customers, not after.**
+IMPACTOS is live at app.useimpactos.com. A bad Youghazi or DigiSmart migration
+(a dropped extension, a lock held on a shared catalogue, an auth trigger, a
+project-wide auth setting) takes IMPACTOS down with it, and nothing in the
+IMPACTOS repo would show why. Today that risk is acceptable: one org, two
+users, no data. Once a customer is paying, it is not.
+
+**Auth is the part to split first, before the tables.** The tables are
+already isolated. Auth is not: one product's template change can break
+another's signup, and a Youghazi staff account can sign in to IMPACTOS and
+create an organisation. Neither of those can be fixed while the `auth` schema
+is shared.
+
 # Rule: an impersonation harness can produce a false pass
 
 Verifying RLS by impersonating a user is the right technique, and it has two
@@ -246,8 +318,24 @@ CI. It checks two things a review will not reliably catch:
 
 Intentional exceptions live in the SQL function `audit_unscoped_policies()`,
 each with a written reason, so an exception is a deliberate act rather than a
-quiet edit to a regex in a script. There is currently one: `organisations`
-INSERT is unscoped because a new customer has no organisation yet.
+quiet edit to a regex in a script. There are currently none. (The one it used
+to hold, `organisations` INSERT, went when org creation moved behind a
+SECURITY DEFINER function.)
+
+**Other products' tables are out of tenant scope, not exceptions to it.**
+`audit_other_products()` lists the `yg_` (Youghazi) and `ds_` (DigiSmart)
+prefixes as "separate product, planned migration out". Their policies are
+excluded from check 1, because the IMPACTOS org model does not apply to them,
+and the script prints that exclusion on every run. They stay in check 2: a
+table with RLS off is open to anon whichever product owns it. Deliberate
+deny-all tables (RLS on, zero policies, reached only through SECURITY DEFINER
+functions) are named with reasons inside `audit_rls_coverage()`. Today those
+are `ds_admin` and `yg_private`. Before this was added (2026-10-27) the sweep
+reported 21 findings, all of them yg_/ds_, so it was permanently red, and a
+real IMPACTOS finding would have been lost in the noise. Re-verified after the
+change: clean, and probes in a rolled-back transaction still fired for an
+IMPACTOS role-only policy, a `yg_` table with RLS off, and a `ds_` table with
+no policies.
 
 **What the sweep is not.** The scoping test is a substring match. A policy
 could mention `org_id` incidentally and still leak. It catches the careless
@@ -287,11 +375,31 @@ looks like a path.
 Nobody outside the team is invited until items 1–2 are live.
 
 1. **Hardcoded `ORG_ID` + sweep.** Built and verified; see the correction under
-   0a. Awaiting deploy.
+   0a. **Deployed:** production serves `44b1448` (checked on the Vercel
+   deployment list 2026-10-27), so 0a's fixes are live too. The Confirm-signup
+   template was switched with it. The owner verified that by the log line
+   `token_hash (type=email) -> session established`.
 2. **Custom SMTP** — Resend, sending from `auth.useimpactos.com`, SPF/DKIM/DMARC.
    The built-in provider delivers only to Supabase team addresses, so signup
    works for the team and fails for every real customer. Then raise the email
    rate limit to ~100/hour, and enable the "sign-in method linked" notification.
+   SMTP is per project, so Youghazi's auth email changes with it. See the
+   three-products rule.
+
+   **`/api/send-notification` was deleted on 2026-10-27, before any Resend
+   domain was verified.** It had no callers (in HEAD or in `f85f01f`), so no
+   notification was ever sent and nothing had been failing silently. But it
+   was a phishing relay waiting for a verified domain. `RESEND_API_KEY` was
+   live in Vercel production. It gated only on "signed in", and anyone can
+   sign up. `to` was free. `data`, including link `href`s, was interpolated
+   into the HTML unescaped. The only thing stopping it was Resend refusing its
+   unverified sender, `notifications@useimpactos.com`. Notifications, if
+   wanted, get rebuilt with real authorisation: a role check, recipients
+   limited to the caller's org, escaped content, URLs built server-side.
+   **Only `auth.useimpactos.com` is ever verified in Resend, never the root.**
+   `RESEND_API_KEY` in Vercel now has no consumer; delete it, or keep it for
+   the rebuild.
+
 3. **Auth hygiene:** own copy for `over_email_send_rate_limit` ("We can't send
    email right now…" — not "too many attempts", which blames a user who made
    one); clear dead sessions (`user_not_found` / `session_not_found`) instead of
@@ -370,7 +478,30 @@ checks, both directions).
 believed when they wrote it. Before relying on one, check the code or the
 database — the check here was a one-line grep that nobody ran.
 
-## 0b. UNFIXED — any user can move themselves into another organisation
+## 0b. FIXED — any user could move themselves into another organisation
+
+**Re-tested 2026-10-27** by impersonation in a rolled-back transaction, against
+`protect_identity` (BEFORE UPDATE on profiles). The fixtures, set up as
+postgres before any impersonation, were a scratch organisation and the orphan
+profile made a viewer in AFRILEAD. Identity was re-established at top level
+before each test, and `auth.uid()` was recorded inside each one.
+
+| Test | As | Result |
+| --- | --- | --- |
+| self `org_id` + `role` → other org / owner (the original repro) | viewer | blocked, `PROC_SELF_ROLE_CHANGE` |
+| self `role` → owner | viewer | blocked, `PROC_SELF_ROLE_CHANGE` |
+| self `org_id` → other org | viewer | blocked, `PROC_SELF_ROLE_CHANGE` |
+| self `first_name` (control) | viewer | OK, 1 row |
+| demote the owner | viewer | 0 rows (RLS) |
+| self `org_id` → other org | owner | blocked, `PROC_SELF_ROLE_CHANGE` |
+| move a member → other org | owner | blocked, `PROC_ORG_IMMUTABLE` |
+| member role → finance (control) | owner | OK, 1 row |
+
+The bypass `impactos.trusted_identity_write` is set only by
+`bind_new_organisation`, which `anon` and `authenticated` cannot execute.
+The INSERT side is 0d. The UPDATE policies still have no `WITH CHECK`. The
+trigger is the guard, so dropping or weakening it reopens this. The original
+finding follows.
 
 **This is a live tenant-isolation bypass and privilege escalation. It blocks
 multi-tenant launch. Found 2026-09-17, not yet fixed.**
@@ -483,7 +614,13 @@ build, so any user who forgot their password has had no recovery path at all —
 not a degraded one, none. Anyone currently locked out has been locked out
 silently, and will not know to try again unless told.
 
-## 0d. UNFIXED — two policy defects found during the ORG_ID sweep
+## 0d. SHIPPED 2026-10-13 — two policy defects found during the ORG_ID sweep
+
+Schema re-checked 2026-10-27: `protect_identity_on_insert` fires on profiles
+INSERT, and `organisations` has a single UPDATE policy, which requires
+`current_user_role() = 'owner'`. That is a structural check, not an
+impersonation run. Add one the next time work touches profiles or
+organisations. The original finding follows.
 
 Both need a migration, so neither was applied in the session that found them.
 
